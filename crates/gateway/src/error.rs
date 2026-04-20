@@ -12,8 +12,8 @@ pub enum AppError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
-    #[error("not implemented")]
-    NotImplemented,
+    #[error("not found")]
+    NotFound,
 
     #[error("internal error: {0}")]
     Internal(String),
@@ -24,7 +24,7 @@ impl AppError {
         match self {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
-            AppError::NotImplemented => (StatusCode::NOT_IMPLEMENTED, "not_implemented"),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
     }
@@ -59,5 +59,14 @@ impl From<serde_json::Error> for AppError {
 impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
         AppError::Internal(format!("{err:#}"))
+    }
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        match err {
+            sqlx::Error::RowNotFound => AppError::NotFound,
+            other => AppError::Internal(format!("sqlx: {other}")),
+        }
     }
 }

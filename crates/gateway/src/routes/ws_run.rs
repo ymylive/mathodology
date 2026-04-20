@@ -46,31 +46,24 @@ async fn handle_socket(
 
     // --- Optional hello frame with `last_seq` ------------------------------
     //
-    // We wait at most ~200ms for it so clients that skip the hello aren't
-    // penalised. `last_seq` maps onto a Redis stream ID: "<ms>-<seq>". We
-    // don't have a true mapping from the client-facing `seq` to the stream
-    // entry ID, so we interpret `last_seq` as "milliseconds since epoch" of
-    // the last entry the client saw — the worker is expected to use
-    // explicit stream IDs. For M1 (no worker yet) we default to `0-0`, which
-    // means "deliver everything".
-    let mut last_id = "0-0".to_string();
+    // Worker XADDs with `*` (auto-assigned timestamp IDs), so a client-facing
+    // `seq` has no direct mapping to a Redis stream ID. We always XREAD from
+    // `0-0` and filter forwarded entries by payload.seq > last_seq instead.
+    // Redis per-run streams are small (MAXLEN ~5000), so re-scanning is cheap.
+    let mut last_seq: u64 = 0;
     tokio::select! {
         maybe_msg = socket.recv() => {
             if let Some(Ok(Message::Text(txt))) = maybe_msg {
                 if let Ok(hello) = serde_json::from_str::<Hello>(&txt) {
-                    if let Some(seq) = hello.last_seq {
-                        if seq > 0 {
-                            last_id = format!("{seq}-0");
-                        }
-                    }
+                    if let Some(s) = hello.last_seq { last_seq = s; }
                 }
             }
-            // Non-text or invalid JSON: silently fall through with defaults.
         }
         _ = tokio::time::sleep(Duration::from_millis(200)) => {}
     }
 
-    tracing::debug!(%run_id, stream_key, %last_id, "ws subscribed to events stream");
+    let mut last_id = "0-0".to_string();
+    tracing::debug!(%run_id, stream_key, last_seq, "ws subscribed to events stream");
 
     // --- Main loop: XREAD with short block timeout, interleaved with client recv ---
     let opts = StreamReadOptions::default().block(500).count(32);
@@ -82,13 +75,18 @@ async fn handle_socket(
                 match read_res {
                     Ok(Some(entries)) => {
                         for (entry_id, payload) in entries {
-                            // Forward payload JSON (already validated upstream) to the client.
+                            // Advance Redis cursor for the next read regardless of filter.
+                            last_id = entry_id;
+
+                            // Skip events already seen by the client.
+                            if event_seq(&payload).is_some_and(|s| s <= last_seq) {
+                                continue;
+                            }
+
                             if socket.send(Message::Text(payload.clone())).await.is_err() {
                                 tracing::debug!(%run_id, "client send failed; closing");
                                 return Ok(());
                             }
-                            // Advance cursor regardless of whether this was a `done`.
-                            last_id = entry_id;
 
                             // If this was a `done` event, flush + close cleanly.
                             if is_done_event(&payload) {
@@ -176,4 +174,11 @@ fn is_done_event(payload: &str) -> bool {
         .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned))
         .as_deref()
         == Some("done")
+}
+
+/// Extract the `seq` field from a JSON event payload.
+fn event_seq(payload: &str) -> Option<u64> {
+    serde_json::from_str::<Value>(payload)
+        .ok()
+        .and_then(|v| v.get("seq").and_then(|s| s.as_u64()))
 }

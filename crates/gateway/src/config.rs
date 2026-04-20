@@ -6,6 +6,7 @@ pub struct AppConfig {
     pub port: u16,
     pub dev_auth_token: String,
     pub redis_url: String,
+    pub database_url: String,
 }
 
 impl AppConfig {
@@ -19,12 +20,15 @@ impl AppConfig {
             std::env::var("DEV_AUTH_TOKEN").context("DEV_AUTH_TOKEN env var is required")?;
         let redis_url = std::env::var("REDIS_URL")
             .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
+        let database_url =
+            std::env::var("DATABASE_URL").context("DATABASE_URL env var is required")?;
 
         Ok(Self {
             host,
             port,
             dev_auth_token,
             redis_url,
+            database_url,
         })
     }
 }

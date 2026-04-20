@@ -2,9 +2,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
+use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod app;
+mod audit;
 mod auth;
 mod config;
 mod dispatch;
@@ -32,8 +34,21 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("failed to connect to Redis")?;
 
+    // Postgres pool + forward-only migrations.
+    let pg = PgPoolOptions::new()
+        .max_connections(8)
+        .connect(&cfg.database_url)
+        .await
+        .context("failed to connect to Postgres")?;
+    sqlx::migrate!("./migrations")
+        .run(&pg)
+        .await
+        .context("failed to run sqlx migrations")?;
+    tracing::info!("postgres connected and migrations applied");
+
     let state = AppState {
         redis,
+        pg,
         config: cfg.clone(),
     };
 

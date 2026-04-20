@@ -5,17 +5,10 @@ use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-mod app;
-mod audit;
-mod auth;
-mod config;
-mod dispatch;
-mod error;
-mod routes;
-mod state;
-
-use crate::config::AppConfig;
-use crate::state::AppState;
+use gateway::app;
+use gateway::config::AppConfig;
+use gateway::llm::LlmContext;
+use gateway::state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,10 +39,15 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to run sqlx migrations")?;
     tracing::info!("postgres connected and migrations applied");
 
+    let llm = LlmContext::bootstrap(&cfg.providers_path)
+        .context("failed to bootstrap LLM provider registry")?;
+    tracing::info!(path = %cfg.providers_path.display(), "LLM provider registry loaded");
+
     let state = AppState {
         redis,
         pg,
         config: cfg.clone(),
+        llm,
     };
 
     let addr: SocketAddr = format!("{}:{}", cfg.host, cfg.port)

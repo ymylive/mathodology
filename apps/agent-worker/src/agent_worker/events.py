@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from itertools import count
 from typing import Any
 from uuid import UUID
 
@@ -17,16 +16,18 @@ EVENTS_MAXLEN = 5000
 class EventEmitter:
     """Per-run event emitter.
 
-    Keeps an in-memory monotonic `seq` counter starting at 1. For M1 this is
-    fine; later milestones will persist the counter so resumed runs don't
-    collide.
+    Sequence numbers are drawn from the Redis counter `mm:seq:<run_id>` via
+    INCR, which is the single source of truth shared with the Rust gateway's
+    token/cost fan-out. The in-memory `_seq` attribute caches the last value
+    we received for logging only.
     """
 
     def __init__(self, redis: Redis, run_id: UUID) -> None:
         self._redis = redis
         self._run_id = run_id
         self._stream_key = f"mm:events:{run_id}"
-        self._seq = count(1)
+        self._seq_key = f"mm:seq:{run_id}"
+        self._seq = 0
 
     async def emit(
         self,
@@ -38,11 +39,12 @@ class EventEmitter:
 
         Returns the stream entry id assigned by Redis.
         """
+        self._seq = await self._redis.incr(self._seq_key)
         event = AgentEvent(
             run_id=self._run_id,
             agent=agent,  # type: ignore[arg-type]
             kind=kind,  # type: ignore[arg-type]
-            seq=next(self._seq),
+            seq=self._seq,
             ts=datetime.now(UTC),
             payload=payload or {},
         )

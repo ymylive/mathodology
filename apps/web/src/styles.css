@@ -1,8 +1,6 @@
 @import "tailwindcss";
 
-/* Global resets for the dark M1 shell. Tailwind v4's @theme mechanism is
-   intentionally not used yet — keep M1 minimal and avoid a custom design
-   system until there's real UI to style. */
+/* Global resets for the dark shell. */
 html,
 body,
 #app {
@@ -29,4 +27,17 @@ body {
     Consolas,
     "Liberation Mono",
     monospace;
+}
+
+/* Semantic agent accent colors used by AgentStreamCard. Kept as CSS
+   variables so the palette lives in one place — Tailwind-native colors
+   picked to stay legible on the dark neutral-950 backdrop. */
+:root {
+  --color-agent-analyzer: #38bdf8;  /* sky-400 */
+  --color-agent-modeler:  #a78bfa;  /* violet-400 */
+  --color-agent-coder:    #34d399;  /* emerald-400 */
+  --color-agent-writer:   #fbbf24;  /* amber-400 */
+  --color-agent-critic:   #f87171;  /* red-400 */
+  --color-agent-searcher: #f472b6;  /* pink-400 */
+  --color-agent-default:  #a3a3a3;  /* neutral-400 */
 }

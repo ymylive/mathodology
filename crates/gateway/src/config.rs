@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 
 #[derive(Debug, Clone)]
@@ -7,6 +9,7 @@ pub struct AppConfig {
     pub dev_auth_token: String,
     pub redis_url: String,
     pub database_url: String,
+    pub providers_path: PathBuf,
 }
 
 impl AppConfig {
@@ -22,6 +25,9 @@ impl AppConfig {
             .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
         let database_url =
             std::env::var("DATABASE_URL").context("DATABASE_URL env var is required")?;
+        let providers_path = std::env::var("PROVIDERS_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("config/providers.toml"));
 
         Ok(Self {
             host,
@@ -29,6 +35,7 @@ impl AppConfig {
             dev_auth_token,
             redis_url,
             database_url,
+            providers_path,
         })
     }
 }

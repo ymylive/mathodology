@@ -1,0 +1,34 @@
+{
+  "id": "euler_method",
+  "name": "Euler Method (explicit first-order ODE solver)",
+  "domain": "ode_pde",
+  "subdomain": "initial_value_problems",
+  "applicable_scenarios": [
+    "teaching / sanity-check solver for simple initial-value ODEs",
+    "very coarse first-pass simulation",
+    "step-by-step derivation in analysis notes"
+  ],
+  "math_form": "y_{n+1} = y_n + h f(t_n, y_n)",
+  "python_template": "import numpy as np\n\ndef euler_ivp(f, t0, y0, t_end, h):\n    ts = [t0]\n    ys = [np.asarray(y0, dtype=float)]\n    t = t0\n    y = ys[0].copy()\n    while t < t_end - 1e-12:\n        y = y + h * np.asarray(f(t, y), dtype=float)\n        t += h\n        ts.append(t)\n        ys.append(y.copy())\n    return np.array(ts), np.array(ys)",
+  "typical_cases": [
+    "population growth dy/dt = ry(1-y/K)",
+    "simple projectile motion without drag",
+    "pedagogical example before moving to RK4"
+  ],
+  "common_pitfalls": [
+    "only O(h) accurate — error accumulates fast for long integrations",
+    "unstable for stiff systems; use implicit methods (Backward Euler, BDF)",
+    "step-size choice is manual; no adaptive control",
+    "for real work prefer scipy.integrate.solve_ivp with RK45 / Radau"
+  ],
+  "keywords": [
+    "Euler method",
+    "ODE",
+    "initial value problem",
+    "numerical integration",
+    "欧拉法",
+    "常微分方程",
+    "数值积分",
+    "初值问题"
+  ]
+}

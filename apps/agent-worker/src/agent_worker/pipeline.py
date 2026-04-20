@@ -2,10 +2,17 @@
 
 The `done` event carries both `notebook_path` and `paper_path` so the
 gateway's audit task can persist them and the UI can offer downloads.
+
+M9 adds the HMML knowledge base: the Modeler consults a BM25-indexed library
+of ~30 canonical modeling methods before producing its ModelSpec. The service
+is loaded lazily once per process; if the seed dir is missing or empty the
+Modeler transparently falls back to its pre-M9 behavior.
 """
 
 from __future__ import annotations
 
+import logging
+from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
@@ -22,7 +29,24 @@ from agent_worker.agents import (
 from agent_worker.config import get_settings
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
+from agent_worker.hmml import HMMLService
 from agent_worker.kernel import KernelSession
+
+_log = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _get_hmml() -> HMMLService | None:
+    """Load the HMML service once per process. Degrade to None on empty seed dir."""
+    try:
+        service = HMMLService.from_seed_dir()
+    except Exception as e:  # noqa: BLE001 — any seed-load failure is non-fatal
+        _log.warning("HMML seed load failed; Modeler will run without it: %s", e)
+        return None
+    if not service.methods:
+        _log.warning("HMML seed dir is empty; Modeler will run without it.")
+        return None
+    return service
 
 
 async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> None:
@@ -35,13 +59,14 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
 
     gateway = GatewayClient(settings.gateway_http, settings.dev_auth_token)
     kernel = KernelSession(run_id, runs_dir)
+    hmml = _get_hmml()
 
     try:
         try:
             analyzer = AnalyzerAgent(gateway, emitter)
             analysis = await analyzer.run_for_problem(problem)
 
-            modeler = ModelerAgent(gateway, emitter)
+            modeler = ModelerAgent(gateway, emitter, hmml=hmml)
             spec = await modeler.run_for(problem, analysis)
 
             coder = CoderAgent(gateway, emitter, kernel)

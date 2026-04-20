@@ -1,0 +1,35 @@
+{
+  "id": "minimum_spanning_tree",
+  "name": "Minimum Spanning Tree (Kruskal / Prim)",
+  "domain": "graph_network",
+  "subdomain": "spanning_tree",
+  "applicable_scenarios": [
+    "connect all nodes in a weighted undirected graph with minimum total edge weight",
+    "network design: cable / pipe / road laying",
+    "preprocessing for clustering (single-linkage via MST)"
+  ],
+  "math_form": "T^* = \\arg\\min_{T \\text{ spanning tree}} \\sum_{e \\in T} w(e)",
+  "python_template": "def kruskal(n, edges):\n    # edges: list[(u, v, w)]\n    parent = list(range(n))\n    def find(x):\n        while parent[x] != x:\n            parent[x] = parent[parent[x]]\n            x = parent[x]\n        return x\n    def union(a, b):\n        ra, rb = find(a), find(b)\n        if ra == rb:\n            return False\n        parent[ra] = rb\n        return True\n    mst = []\n    for u, v, w in sorted(edges, key=lambda e: e[2]):\n        if union(u, v):\n            mst.append((u, v, w))\n            if len(mst) == n - 1:\n                break\n    return mst",
+  "typical_cases": [
+    "designing a telecom backbone",
+    "building the cheapest connected road system",
+    "single-linkage clustering on a distance matrix"
+  ],
+  "common_pitfalls": [
+    "assumes undirected graph; directed version is the arborescence problem",
+    "edge weights must allow a total ordering — equal weights yield many valid MSTs",
+    "Kruskal needs efficient union-find to achieve O(E log E)",
+    "sparse vs. dense: Prim with a heap wins on dense, Kruskal on sparse"
+  ],
+  "keywords": [
+    "minimum spanning tree",
+    "MST",
+    "Kruskal",
+    "Prim",
+    "graph",
+    "最小生成树",
+    "图论",
+    "普里姆",
+    "克鲁斯卡尔"
+  ]
+}

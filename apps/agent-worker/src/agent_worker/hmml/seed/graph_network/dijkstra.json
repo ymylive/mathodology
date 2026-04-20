@@ -1,0 +1,35 @@
+{
+  "id": "dijkstra",
+  "name": "Dijkstra Shortest Path",
+  "domain": "graph_network",
+  "subdomain": "shortest_path",
+  "applicable_scenarios": [
+    "single-source shortest path in a weighted graph with non-negative edges",
+    "routing on road, transit, or communication networks",
+    "base case for many graph-distance problems"
+  ],
+  "math_form": "d(v) = \\min_{u \\in N(v)} (d(u) + w(u, v))",
+  "python_template": "import heapq\n\ndef dijkstra(graph, source):\n    # graph: dict[node, list[(neighbor, weight)]]\n    dist = {source: 0.0}\n    pq = [(0.0, source)]\n    while pq:\n        du, u = heapq.heappop(pq)\n        if du > dist.get(u, float('inf')):\n            continue\n        for v, w in graph.get(u, []):\n            nd = du + w\n            if nd < dist.get(v, float('inf')):\n                dist[v] = nd\n                heapq.heappush(pq, (nd, v))\n    return dist",
+  "typical_cases": [
+    "shortest driving route between cities",
+    "minimum-latency routing in a network",
+    "maze / grid navigation with uniform-positive costs"
+  ],
+  "common_pitfalls": [
+    "requires non-negative edge weights; use Bellman-Ford for negatives",
+    "without a priority queue, complexity degrades to O(V^2)",
+    "for all-pairs paths, Floyd-Warshall or Johnson's is often preferable",
+    "dense graphs benefit from contraction hierarchies / A* with a heuristic"
+  ],
+  "keywords": [
+    "Dijkstra",
+    "shortest path",
+    "graph",
+    "routing",
+    "priority queue",
+    "最短路径",
+    "最短路",
+    "图论",
+    "迪杰斯特拉"
+  ]
+}

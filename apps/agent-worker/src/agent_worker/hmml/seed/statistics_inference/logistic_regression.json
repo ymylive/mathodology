@@ -1,0 +1,34 @@
+{
+  "id": "logistic_regression",
+  "name": "Logistic Regression",
+  "domain": "statistics_inference",
+  "subdomain": "generalized_linear_models",
+  "applicable_scenarios": [
+    "model a binary outcome as a function of predictors",
+    "interpretable classification baseline with odds-ratio coefficients",
+    "probability estimation with well-calibrated outputs"
+  ],
+  "math_form": "P(y=1 \\mid x) = \\sigma(\\beta^T x), \\; \\sigma(z) = 1 / (1 + e^{-z})",
+  "python_template": "import numpy as np\nfrom sklearn.linear_model import LogisticRegression\n\ndef fit_logistic(X, y, C=1.0):\n    model = LogisticRegression(C=C, max_iter=1000, solver='lbfgs')\n    model.fit(X, y)\n    return model\n\ndef predict_proba(model, X):\n    return model.predict_proba(X)[:, 1]",
+  "typical_cases": [
+    "credit default prediction",
+    "disease presence from clinical features",
+    "customer churn modeling"
+  ],
+  "common_pitfalls": [
+    "perfect / quasi-separation yields infinite coefficients; regularize",
+    "imbalanced classes distort thresholding — tune threshold or use class_weight",
+    "probabilities need calibration (Platt / isotonic) for decision-theoretic use",
+    "multicollinearity destabilizes coefficient interpretation"
+  ],
+  "keywords": [
+    "logistic regression",
+    "binary classification",
+    "GLM",
+    "sigmoid",
+    "逻辑回归",
+    "逻辑斯蒂",
+    "二分类",
+    "广义线性模型"
+  ]
+}

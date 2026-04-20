@@ -1,0 +1,33 @@
+{
+  "id": "nonlinear_least_squares",
+  "name": "Nonlinear Least Squares (Levenberg-Marquardt)",
+  "domain": "optimization",
+  "subdomain": "nonlinear_programming",
+  "applicable_scenarios": [
+    "fit a nonlinear parametric model y = f(x; theta) to observations",
+    "calibration of physical / chemical rate constants",
+    "curve fitting when the response surface is smooth but non-linear"
+  ],
+  "math_form": "\\theta^* = \\arg\\min_\\theta \\sum_i (y_i - f(x_i; \\theta))^2",
+  "python_template": "import numpy as np\nfrom scipy.optimize import least_squares\n\ndef nls_fit(f, theta0, x, y):\n    # f(theta, x) -> predicted y of shape (n,).\n    def residual(theta):\n        return f(theta, x) - y\n    result = least_squares(residual, theta0, method='lm')\n    return result.x, result",
+  "typical_cases": [
+    "logistic growth fit to epidemic curves",
+    "Michaelis-Menten enzyme kinetics",
+    "Arrhenius rate law calibration"
+  ],
+  "common_pitfalls": [
+    "sensitive to initial guess; bad theta0 yields local minima",
+    "requires a differentiable (or at least smooth) residual function",
+    "ill-conditioned Jacobians need bounds or reparameterization",
+    "LM assumes Gaussian-like residuals; use robust loss for outliers"
+  ],
+  "keywords": [
+    "nonlinear least squares",
+    "Levenberg-Marquardt",
+    "curve fitting",
+    "parameter estimation",
+    "非线性最小二乘",
+    "参数估计",
+    "曲线拟合"
+  ]
+}

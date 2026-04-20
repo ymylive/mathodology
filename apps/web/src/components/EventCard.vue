@@ -10,6 +10,7 @@ import {
   CircleDollarSign,
   Dot,
   Image as ImageIcon,
+  Library,
   Play,
   Square,
   Terminal,
@@ -31,6 +32,19 @@ const executingCellIndex = computed<number | null>(() => {
   if (!m) return null;
   const n = Number.parseInt(m[1], 10);
   return Number.isNaN(n) ? null : n;
+});
+
+// M9: "HMML retrieved: OLS, PCA, ARIMA, ..." — surface the comma list as
+// a compact sky-tinted pill next to a Library icon so the reader can
+// skim which methods the Modeler evaluated without reading the raw log.
+const HMML_RETRIEVED_RE = /^HMML retrieved:\s*(.+)$/;
+
+const hmmlRetrieved = computed<string | null>(() => {
+  if (props.event.kind !== "log") return null;
+  const p = props.event.payload as { message?: unknown };
+  if (typeof p.message !== "string") return null;
+  const m = HMML_RETRIEVED_RE.exec(p.message);
+  return m ? m[1].trim() : null;
 });
 
 const figureInfo = computed<{ path: string; src: string } | null>(() => {
@@ -211,6 +225,24 @@ const truncatedSummary = computed(() => {
         <Play class="h-3 w-3" aria-hidden="true" />
         <span>Cell {{ executingCellIndex }}</span>
       </Badge>
+
+      <!-- HMML retrieval log: sky-tinted pill with a Library icon, then
+           the comma-separated method list in the normal summary slot so
+           long lists still wrap gracefully rather than overflow. -->
+      <template v-else-if="hmmlRetrieved !== null">
+        <Badge
+          variant="outline"
+          class="mono text-[11px] py-0 px-1.5 font-normal gap-1 border-sky-900 bg-sky-950/60 text-sky-300"
+        >
+          <Library class="h-3 w-3" aria-hidden="true" />
+          <span>HMML</span>
+        </Badge>
+        <span
+          class="text-sm text-foreground break-words min-w-0 whitespace-pre-wrap"
+        >
+          {{ hmmlRetrieved }}
+        </span>
+      </template>
 
       <!-- Figure: inline thumbnail next to its path. -->
       <template v-else-if="figureInfo">

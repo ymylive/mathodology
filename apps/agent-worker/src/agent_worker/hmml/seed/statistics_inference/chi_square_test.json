@@ -1,0 +1,34 @@
+{
+  "id": "chi_square_test",
+  "name": "Chi-square Test",
+  "domain": "statistics_inference",
+  "subdomain": "hypothesis_testing",
+  "applicable_scenarios": [
+    "test independence of two categorical variables from a contingency table",
+    "goodness-of-fit between observed counts and a theoretical distribution",
+    "categorical A/B testing with counts rather than means"
+  ],
+  "math_form": "\\chi^2 = \\sum_{i,j} (O_{ij} - E_{ij})^2 / E_{ij}",
+  "python_template": "import numpy as np\nfrom scipy import stats\n\ndef chi2_independence(contingency):\n    chi2, p, dof, expected = stats.chi2_contingency(contingency)\n    return {'chi2': chi2, 'p': p, 'dof': dof, 'expected': expected}\n\ndef chi2_goodness_of_fit(observed, expected):\n    return stats.chisquare(f_obs=observed, f_exp=expected)",
+  "typical_cases": [
+    "association between gender and voting preference",
+    "check whether dice rolls deviate from uniform",
+    "click-through rates across several ad variants"
+  ],
+  "common_pitfalls": [
+    "requires expected cell counts >= 5 in most cells; otherwise use Fisher's exact",
+    "categorical variables must be mutually exclusive and exhaustive",
+    "large samples make even trivial differences significant — report effect size (Cramer's V)",
+    "not appropriate for ordinal / paired categorical data"
+  ],
+  "keywords": [
+    "chi-square",
+    "chi2",
+    "contingency table",
+    "goodness of fit",
+    "卡方检验",
+    "列联表",
+    "独立性检验",
+    "拟合优度"
+  ]
+}

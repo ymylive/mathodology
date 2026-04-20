@@ -1,0 +1,35 @@
+{
+  "id": "stl_decomposition",
+  "name": "STL (Seasonal-Trend decomposition using LOESS)",
+  "domain": "time_series",
+  "subdomain": "decomposition",
+  "applicable_scenarios": [
+    "separate a univariate series into seasonal, trend, and residual components",
+    "exploratory time-series analysis",
+    "detect anomalies by inspecting the residual after removing seasonality"
+  ],
+  "math_form": "y_t = T_t + S_t + R_t",
+  "python_template": "import numpy as np\nfrom statsmodels.tsa.seasonal import STL\n\ndef stl_decompose(y, period=12, seasonal=7, robust=True):\n    stl = STL(y, period=period, seasonal=seasonal, robust=robust)\n    result = stl.fit()\n    return result  # .trend, .seasonal, .resid",
+  "typical_cases": [
+    "decomposing monthly CO2 series into annual cycle + long-term trend",
+    "pre-processing step for residual-based anomaly detection",
+    "visualizing growth trend under strong seasonality"
+  ],
+  "common_pitfalls": [
+    "requires the seasonal period to be known a priori",
+    "non-robust STL is sensitive to outliers — use robust=True when in doubt",
+    "short series (< 2 periods) cannot be decomposed reliably",
+    "residuals are not guaranteed to be white noise — check ACF"
+  ],
+  "keywords": [
+    "STL",
+    "seasonal decomposition",
+    "LOESS",
+    "trend",
+    "seasonality",
+    "季节分解",
+    "趋势",
+    "时间序列",
+    "季节性"
+  ]
+}

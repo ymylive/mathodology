@@ -1,0 +1,33 @@
+{
+  "id": "ridge_regression",
+  "name": "Ridge Regression (L2 regularization)",
+  "domain": "optimization",
+  "subdomain": "linear_models",
+  "applicable_scenarios": [
+    "linear regression when predictors are strongly correlated",
+    "stabilize coefficients under small n / large p",
+    "reduce variance at the cost of a small bias"
+  ],
+  "math_form": "\\hat{\\beta} = \\arg\\min_\\beta \\|y - X\\beta\\|_2^2 + \\alpha \\|\\beta\\|_2^2",
+  "python_template": "import numpy as np\nfrom sklearn.linear_model import Ridge\n\ndef ridge_fit(X: np.ndarray, y: np.ndarray, alpha: float = 1.0) -> Ridge:\n    model = Ridge(alpha=alpha)\n    model.fit(X, y)\n    return model",
+  "typical_cases": [
+    "genomic or sensor arrays with many correlated features",
+    "regularized calibration problems",
+    "baseline for any high-dimensional regression"
+  ],
+  "common_pitfalls": [
+    "requires feature scaling; penalty is unit-dependent",
+    "alpha chosen without cross-validation can under- or over-regularize",
+    "does not produce exactly-zero coefficients (use Lasso for selection)"
+  ],
+  "keywords": [
+    "ridge",
+    "L2 regularization",
+    "shrinkage",
+    "regularized regression",
+    "岭回归",
+    "正则化",
+    "收缩估计",
+    "Tikhonov"
+  ]
+}

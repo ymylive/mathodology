@@ -1,0 +1,34 @@
+{
+  "id": "t_test",
+  "name": "Student's t-test",
+  "domain": "statistics_inference",
+  "subdomain": "hypothesis_testing",
+  "applicable_scenarios": [
+    "compare the mean of a sample to a known value (one-sample)",
+    "compare means of two independent samples (two-sample)",
+    "compare paired measurements before and after treatment (paired)"
+  ],
+  "math_form": "t = (\\bar{x} - \\mu_0) / (s / \\sqrt{n})",
+  "python_template": "import numpy as np\nfrom scipy import stats\n\ndef one_sample_t(sample, mu0):\n    return stats.ttest_1samp(sample, mu0)\n\ndef two_sample_t(a, b, equal_var=False):\n    # Welch's t by default (equal_var=False) handles unequal variances.\n    return stats.ttest_ind(a, b, equal_var=equal_var)\n\ndef paired_t(a, b):\n    return stats.ttest_rel(a, b)",
+  "typical_cases": [
+    "A/B test of two website conversion rates (means of continuous metrics)",
+    "compare exam scores between two schools",
+    "pre/post weight change in a diet study"
+  ],
+  "common_pitfalls": [
+    "assumes approximate normality; for small n (<20) with skew, use a rank test",
+    "two-sample t with unequal variances needs Welch's correction",
+    "correlated observations violate independence; prefer paired t or mixed models",
+    "multiple comparisons inflate Type-I error; correct with Bonferroni or FDR"
+  ],
+  "keywords": [
+    "t-test",
+    "hypothesis testing",
+    "means comparison",
+    "Welch",
+    "t检验",
+    "假设检验",
+    "均值比较",
+    "配对样本"
+  ]
+}

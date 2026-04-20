@@ -1,0 +1,35 @@
+{
+  "id": "rk4",
+  "name": "Runge-Kutta 4th Order (RK4)",
+  "domain": "ode_pde",
+  "subdomain": "initial_value_problems",
+  "applicable_scenarios": [
+    "non-stiff initial-value ODE systems requiring 4th-order accuracy",
+    "smooth right-hand sides where explicit methods are efficient",
+    "classical workhorse for dynamical-system simulation"
+  ],
+  "math_form": "y_{n+1} = y_n + \\tfrac{h}{6}(k_1 + 2k_2 + 2k_3 + k_4)",
+  "python_template": "import numpy as np\n\ndef rk4_ivp(f, t0, y0, t_end, h):\n    ts = [t0]\n    ys = [np.asarray(y0, dtype=float)]\n    t = t0\n    y = ys[0].copy()\n    while t < t_end - 1e-12:\n        k1 = np.asarray(f(t, y), dtype=float)\n        k2 = np.asarray(f(t + h/2, y + h/2 * k1), dtype=float)\n        k3 = np.asarray(f(t + h/2, y + h/2 * k2), dtype=float)\n        k4 = np.asarray(f(t + h, y + h * k3), dtype=float)\n        y = y + (h/6) * (k1 + 2*k2 + 2*k3 + k4)\n        t += h\n        ts.append(t)\n        ys.append(y.copy())\n    return np.array(ts), np.array(ys)",
+  "typical_cases": [
+    "Lorenz system simulation",
+    "orbital mechanics (two-body problem)",
+    "predator-prey (Lotka-Volterra) dynamics"
+  ],
+  "common_pitfalls": [
+    "not appropriate for stiff systems; use implicit / BDF methods",
+    "fixed step size without error control; consider RK45 (Dormand-Prince)",
+    "cost is 4 RHS evaluations per step — prohibitive if RHS is expensive",
+    "for production use prefer scipy.integrate.solve_ivp"
+  ],
+  "keywords": [
+    "Runge-Kutta",
+    "RK4",
+    "ODE",
+    "numerical integration",
+    "initial value problem",
+    "龙格库塔",
+    "RK4",
+    "常微分方程",
+    "数值积分"
+  ]
+}

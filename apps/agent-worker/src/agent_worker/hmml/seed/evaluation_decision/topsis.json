@@ -1,0 +1,35 @@
+{
+  "id": "topsis",
+  "name": "TOPSIS (Technique for Order Preference by Similarity to Ideal Solution)",
+  "domain": "evaluation_decision",
+  "subdomain": "multi_criteria_decision",
+  "applicable_scenarios": [
+    "rank a finite set of alternatives on multiple conflicting criteria",
+    "supplier / location / project selection",
+    "competition evaluation problems asking for a composite score"
+  ],
+  "math_form": "S_i^* = D_i^- / (D_i^+ + D_i^-),\\; D_i^\\pm = \\sqrt{\\sum_j (v_{ij} - v_j^\\pm)^2}",
+  "python_template": "import numpy as np\n\ndef topsis(X, weights, benefit=None):\n    # X: (n_alt, n_crit). benefit[j] True for higher-is-better, False for cost.\n    X = np.asarray(X, dtype=float)\n    w = np.asarray(weights, dtype=float)\n    if benefit is None:\n        benefit = [True] * X.shape[1]\n    # 1. vector-normalize\n    norm = X / np.linalg.norm(X, axis=0, keepdims=True)\n    # 2. weight\n    V = norm * w\n    # 3. ideal / anti-ideal\n    v_best = np.where(benefit, V.max(axis=0), V.min(axis=0))\n    v_worst = np.where(benefit, V.min(axis=0), V.max(axis=0))\n    # 4. distances\n    d_best = np.linalg.norm(V - v_best, axis=1)\n    d_worst = np.linalg.norm(V - v_worst, axis=1)\n    # 5. relative closeness\n    return d_worst / (d_best + d_worst)",
+  "typical_cases": [
+    "ranking candidate cities for a factory",
+    "supplier selection scoring in procurement",
+    "athlete / team composite ranking"
+  ],
+  "common_pitfalls": [
+    "sensitive to normalization scheme — results shift with min-max vs. vector norm",
+    "weight elicitation is subjective; pair with AHP or entropy weighting",
+    "rank reversal when alternatives are added/removed",
+    "requires all criteria to be at least interval-scaled"
+  ],
+  "keywords": [
+    "TOPSIS",
+    "multi-criteria decision",
+    "MCDM",
+    "ranking",
+    "ideal solution",
+    "优劣解距离法",
+    "综合评价",
+    "多属性决策",
+    "理想解"
+  ]
+}

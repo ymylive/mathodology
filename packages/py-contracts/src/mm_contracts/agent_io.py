@@ -156,6 +156,35 @@ class Equation(BaseModel):
     description: str  # short prose
 
 
+class MethodNode(BaseModel):
+    """A single entry in the HMML (Hierarchical Math Modeling Library) knowledge base."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str  # slug, e.g. "ols_linear_regression"
+    name: str  # display name
+    domain: str  # top-level: optimization, statistics, ...
+    subdomain: str  # e.g. "linear_models", "combinatorial"
+    applicable_scenarios: list[str] = Field(min_length=1, max_length=10)
+    math_form: str  # short LaTeX summary of the canonical equation(s)
+    python_template: str  # minimal working snippet (stdlib + numpy/scipy)
+    typical_cases: list[str] = Field(default_factory=list, max_length=10)
+    common_pitfalls: list[str] = Field(default_factory=list, max_length=10)
+    keywords: list[str] = Field(default_factory=list, max_length=15)
+
+
+class ConsultedMethod(BaseModel):
+    """How Modeler reported which HMML methods it reviewed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    reason: str  # short phrase, e.g. "selected as primary",
+    # "considered but inferior because ...",
+    # "partial basis for hybrid approach"
+
+
 class ModelSpec(BaseModel):
     """Modeler agent output: one chosen modeling approach, fully specified."""
 
@@ -168,6 +197,9 @@ class ModelSpec(BaseModel):
     algorithm_outline: list[str] = Field(min_length=1, max_length=15)
     complexity_notes: str | None = None
     validation_strategy: str
+    consulted_methods: list[ConsultedMethod] = Field(
+        default_factory=list, max_length=10
+    )
 
 
 class CellExecution(BaseModel):

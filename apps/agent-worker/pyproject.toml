@@ -19,6 +19,7 @@ dependencies = [
   "matplotlib>=3.9",
   "scipy>=1.13",
   "scikit-learn>=1.5",
+  "rank-bm25>=0.2.2",
 ]
 
 [dependency-groups]

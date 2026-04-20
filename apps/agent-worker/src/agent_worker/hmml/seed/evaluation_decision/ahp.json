@@ -1,0 +1,35 @@
+{
+  "id": "ahp",
+  "name": "Analytic Hierarchy Process (AHP)",
+  "domain": "evaluation_decision",
+  "subdomain": "multi_criteria_decision",
+  "applicable_scenarios": [
+    "derive criteria weights from expert pairwise comparisons",
+    "hierarchical decision problems with goal -> criteria -> alternatives",
+    "structuring subjective judgments into a consistent weight vector"
+  ],
+  "math_form": "A w = \\lambda_{\\max} w,\\; \\mathrm{CR} = \\mathrm{CI} / \\mathrm{RI},\\; \\mathrm{CI} = (\\lambda_{\\max} - n)/(n-1)",
+  "python_template": "import numpy as np\n\ndef ahp_weights(A):\n    # A: n x n pairwise-comparison matrix with a[i][j] = importance of i over j.\n    A = np.asarray(A, dtype=float)\n    eigvals, eigvecs = np.linalg.eig(A)\n    idx = int(np.argmax(eigvals.real))\n    lam_max = float(eigvals.real[idx])\n    w = np.abs(eigvecs[:, idx].real)\n    w = w / w.sum()\n    n = A.shape[0]\n    ci = (lam_max - n) / (n - 1) if n > 1 else 0.0\n    ri_table = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24,\n                7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}\n    ri = ri_table.get(n, 1.49)\n    cr = ci / ri if ri > 0 else 0.0\n    return w, lam_max, cr",
+  "typical_cases": [
+    "weighting criteria for a TOPSIS-style composite score",
+    "prioritizing project alternatives under expert judgment",
+    "policy choice with qualitative + quantitative criteria"
+  ],
+  "common_pitfalls": [
+    "consistency ratio CR should be < 0.1; otherwise revisit the matrix",
+    "pairwise judgments don't scale past ~9 criteria (cognitive load)",
+    "rank reversal when alternatives change — known critique",
+    "garbage-in-garbage-out: weights are only as good as the expert elicitation"
+  ],
+  "keywords": [
+    "AHP",
+    "analytic hierarchy process",
+    "pairwise comparison",
+    "weights",
+    "consistency ratio",
+    "层次分析法",
+    "判断矩阵",
+    "一致性检验",
+    "权重"
+  ]
+}

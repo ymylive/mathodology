@@ -1,0 +1,34 @@
+{
+  "id": "genetic_algorithm",
+  "name": "Genetic Algorithm (GA)",
+  "domain": "optimization",
+  "subdomain": "metaheuristics",
+  "applicable_scenarios": [
+    "black-box optimization where gradients are unavailable",
+    "combinatorial problems with large discrete search spaces",
+    "multi-modal objective surfaces requiring exploration"
+  ],
+  "math_form": "x_{t+1} = \\text{Select}(\\text{Mutate}(\\text{Crossover}(P_t))), \\; P_t \\subset \\mathcal{X}",
+  "python_template": "import numpy as np\n\ndef ga(fitness, bounds, pop_size=50, n_gen=100, pc=0.9, pm=0.1, rng=None):\n    rng = rng or np.random.default_rng(0)\n    lo, hi = np.asarray(bounds).T\n    pop = rng.uniform(lo, hi, size=(pop_size, len(lo)))\n    for _ in range(n_gen):\n        scores = np.array([fitness(ind) for ind in pop])\n        idx = np.argsort(scores)\n        pop = pop[idx]\n        children = []\n        while len(children) < pop_size:\n            a, b = pop[rng.integers(pop_size // 2, size=2)]\n            c = np.where(rng.random(len(lo)) < pc, a, b)\n            mask = rng.random(len(lo)) < pm\n            c = np.where(mask, rng.uniform(lo, hi), c)\n            children.append(c)\n        pop = np.array(children)\n    scores = np.array([fitness(ind) for ind in pop])\n    return pop[np.argmin(scores)]",
+  "typical_cases": [
+    "traveling salesman and vehicle routing",
+    "hyper-parameter search when evaluations are cheap",
+    "engineering design optimization"
+  ],
+  "common_pitfalls": [
+    "no convergence guarantees; stagnation on deceptive landscapes",
+    "heavy dependence on operator / parameter tuning",
+    "slow when fitness evaluation is expensive; cache or surrogate",
+    "elitism without diversity control loses exploration quickly"
+  ],
+  "keywords": [
+    "genetic algorithm",
+    "GA",
+    "evolutionary",
+    "metaheuristic",
+    "遗传算法",
+    "进化算法",
+    "启发式",
+    "全局优化"
+  ]
+}

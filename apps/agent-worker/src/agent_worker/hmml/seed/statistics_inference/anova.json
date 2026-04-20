@@ -1,0 +1,34 @@
+{
+  "id": "anova",
+  "name": "Analysis of Variance (ANOVA)",
+  "domain": "statistics_inference",
+  "subdomain": "hypothesis_testing",
+  "applicable_scenarios": [
+    "compare means across three or more groups",
+    "one-way and factorial designs for experimental data",
+    "partition total variance into between-group and within-group components"
+  ],
+  "math_form": "F = \\text{MS}_{\\text{between}} / \\text{MS}_{\\text{within}}",
+  "python_template": "import numpy as np\nfrom scipy import stats\nimport statsmodels.api as sm\nfrom statsmodels.formula.api import ols\n\ndef one_way_anova(*groups):\n    return stats.f_oneway(*groups)\n\ndef two_way_anova(df, formula='y ~ C(factor1) + C(factor2) + C(factor1):C(factor2)'):\n    model = ols(formula, data=df).fit()\n    return sm.stats.anova_lm(model, typ=2)",
+  "typical_cases": [
+    "agricultural yield across three fertilizer treatments",
+    "reaction time under four drug doses",
+    "manufacturing defect rates across multiple shifts"
+  ],
+  "common_pitfalls": [
+    "assumes homogeneity of variance (Levene/Bartlett); otherwise use Welch ANOVA",
+    "ANOVA only tells you means differ, not which pair — follow with Tukey HSD",
+    "non-normal residuals with small n mislead F; consider Kruskal-Wallis",
+    "unbalanced designs require Type II/III sums of squares"
+  ],
+  "keywords": [
+    "ANOVA",
+    "analysis of variance",
+    "F-test",
+    "group comparison",
+    "方差分析",
+    "F检验",
+    "多组比较",
+    "单因素"
+  ]
+}

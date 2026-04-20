@@ -1,0 +1,35 @@
+{
+  "id": "gradient_boosting",
+  "name": "Gradient Boosting Trees (XGBoost / LightGBM style)",
+  "domain": "classification_regression_ml",
+  "subdomain": "tree_ensemble",
+  "applicable_scenarios": [
+    "state-of-the-art tabular classification and regression",
+    "handle missing values and mixed feature types out of the box (in modern libs)",
+    "Kaggle-style problems with tens of features and thousands to millions of rows"
+  ],
+  "math_form": "F_m(x) = F_{m-1}(x) + \\eta \\cdot h_m(x), \\; h_m = \\arg\\min_h \\sum_i L(y_i, F_{m-1}(x_i) + h(x_i))",
+  "python_template": "import numpy as np\nfrom sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier\n\ndef fit_gb_regressor(X, y, n_estimators=500, lr=0.05, max_depth=3, seed=0):\n    model = GradientBoostingRegressor(\n        n_estimators=n_estimators, learning_rate=lr,\n        max_depth=max_depth, random_state=seed,\n    )\n    model.fit(X, y)\n    return model\n\ndef fit_gb_classifier(X, y, n_estimators=500, lr=0.05, max_depth=3, seed=0):\n    model = GradientBoostingClassifier(\n        n_estimators=n_estimators, learning_rate=lr,\n        max_depth=max_depth, random_state=seed,\n    )\n    model.fit(X, y)\n    return model",
+  "typical_cases": [
+    "click-through-rate prediction",
+    "risk / fraud scoring",
+    "demand forecasting with many engineered features"
+  ],
+  "common_pitfalls": [
+    "high capacity — overfits without early stopping on a validation set",
+    "sensitive to learning_rate / n_estimators interaction; tune jointly",
+    "not GPU-friendly in sklearn; use XGBoost / LightGBM / CatBoost for scale",
+    "poor calibration out of the box — apply Platt / isotonic for probabilities"
+  ],
+  "keywords": [
+    "gradient boosting",
+    "XGBoost",
+    "LightGBM",
+    "boosting",
+    "tree ensemble",
+    "梯度提升",
+    "提升树",
+    "集成学习",
+    "回归"
+  ]
+}

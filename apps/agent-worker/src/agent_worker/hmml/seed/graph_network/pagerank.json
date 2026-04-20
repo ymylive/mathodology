@@ -1,0 +1,35 @@
+{
+  "id": "pagerank",
+  "name": "PageRank",
+  "domain": "graph_network",
+  "subdomain": "centrality",
+  "applicable_scenarios": [
+    "rank nodes in a directed graph by stationary importance",
+    "influence ranking in social / citation / web graphs",
+    "baseline centrality measure for directed networks"
+  ],
+  "math_form": "r = \\alpha M r + (1-\\alpha)/N \\cdot \\mathbf{1}",
+  "python_template": "import numpy as np\n\ndef pagerank(A, alpha=0.85, tol=1e-8, max_iter=200):\n    # A: adjacency matrix, rows = outlinks. Dangling rows handled via teleport.\n    A = np.asarray(A, dtype=float)\n    n = A.shape[0]\n    out = A.sum(axis=1, keepdims=True)\n    out[out == 0] = 1.0\n    M = (A / out).T\n    r = np.ones(n) / n\n    teleport = (1 - alpha) / n\n    for _ in range(max_iter):\n        rn = alpha * (M @ r) + teleport\n        if np.linalg.norm(rn - r, 1) < tol:\n            return rn\n        r = rn\n    return r",
+  "typical_cases": [
+    "ranking academic papers in a citation network",
+    "importance of users in a follower / retweet graph",
+    "relevance scoring in a web-link graph"
+  ],
+  "common_pitfalls": [
+    "dangling nodes (no outlinks) need teleport handling or they sink probability",
+    "damping factor alpha strongly affects results; 0.85 is conventional",
+    "not informative on small / dense graphs — degree centrality often suffices",
+    "power iteration may be slow on poorly-conditioned graphs"
+  ],
+  "keywords": [
+    "PageRank",
+    "centrality",
+    "graph",
+    "ranking",
+    "Markov chain",
+    "PageRank",
+    "中心性",
+    "图论",
+    "影响力"
+  ]
+}

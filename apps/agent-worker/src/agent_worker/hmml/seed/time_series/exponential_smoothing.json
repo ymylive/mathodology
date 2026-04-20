@@ -1,0 +1,34 @@
+{
+  "id": "exponential_smoothing",
+  "name": "Exponential Smoothing (Holt-Winters)",
+  "domain": "time_series",
+  "subdomain": "state_space_forecasting",
+  "applicable_scenarios": [
+    "forecast series with level, trend, and/or seasonality",
+    "simple, robust baseline that handles seasonality natively",
+    "short-horizon demand or sales forecasting"
+  ],
+  "math_form": "\\ell_t = \\alpha y_t + (1-\\alpha)(\\ell_{t-1} + b_{t-1})",
+  "python_template": "import numpy as np\nfrom statsmodels.tsa.holtwinters import ExponentialSmoothing\n\ndef fit_holt_winters(y, trend='add', seasonal='add', seasonal_periods=12):\n    model = ExponentialSmoothing(\n        y, trend=trend, seasonal=seasonal,\n        seasonal_periods=seasonal_periods,\n    )\n    return model.fit()\n\ndef forecast(result, steps=12):\n    return result.forecast(steps)",
+  "typical_cases": [
+    "monthly retail sales with yearly seasonality",
+    "electricity demand (daily / weekly cycles)",
+    "inventory replenishment planning"
+  ],
+  "common_pitfalls": [
+    "additive vs. multiplicative mismatch on series where variance grows with level",
+    "season length must be specified correctly; misspecification ruins forecasts",
+    "damped trend often beats plain Holt on long horizons",
+    "not robust to structural breaks or outliers — preprocess first"
+  ],
+  "keywords": [
+    "exponential smoothing",
+    "Holt-Winters",
+    "ETS",
+    "seasonality",
+    "time series",
+    "指数平滑",
+    "季节性",
+    "Holt"
+  ]
+}

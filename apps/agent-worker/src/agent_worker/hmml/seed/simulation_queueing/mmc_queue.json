@@ -1,0 +1,35 @@
+{
+  "id": "mmc_queue",
+  "name": "M/M/c Queueing Model",
+  "domain": "simulation_queueing",
+  "subdomain": "queueing_theory",
+  "applicable_scenarios": [
+    "analyze a service system with Poisson arrivals, exponential service, and c identical servers",
+    "staffing decisions in call centers, hospitals, and service counters",
+    "closed-form steady-state performance for capacity planning"
+  ],
+  "math_form": "\\rho = \\lambda / (c \\mu), \\; L_q = \\frac{(c\\rho)^c \\rho}{c!(1-\\rho)^2} P_0",
+  "python_template": "import math\n\ndef mmc_metrics(lam, mu, c):\n    rho = lam / (c * mu)\n    if rho >= 1:\n        raise ValueError('system unstable: rho >= 1')\n    summation = sum((c * rho) ** n / math.factorial(n) for n in range(c))\n    tail = (c * rho) ** c / (math.factorial(c) * (1 - rho))\n    p0 = 1.0 / (summation + tail)\n    lq = ((c * rho) ** c * rho / (math.factorial(c) * (1 - rho) ** 2)) * p0\n    wq = lq / lam\n    l = lq + lam / mu\n    w = l / lam\n    return {'rho': rho, 'P0': p0, 'Lq': lq, 'L': l, 'Wq': wq, 'W': w}",
+  "typical_cases": [
+    "call center staffing at a given arrival rate",
+    "checkout counters at a supermarket",
+    "emergency-room triage capacity planning"
+  ],
+  "common_pitfalls": [
+    "model assumes Poisson arrivals and exponential service — verify with data",
+    "stability requires rho < 1; rho >= 1 blows up the queue unboundedly",
+    "batch arrivals, priority classes, or finite buffers break the formulas",
+    "time-varying arrival rates require M_t/M/c or simulation"
+  ],
+  "keywords": [
+    "M/M/c",
+    "queueing theory",
+    "queueing",
+    "Poisson arrivals",
+    "Erlang",
+    "排队论",
+    "服务系统",
+    "马尔可夫链",
+    "多服务台"
+  ]
+}

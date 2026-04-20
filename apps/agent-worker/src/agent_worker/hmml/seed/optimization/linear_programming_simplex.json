@@ -1,0 +1,34 @@
+{
+  "id": "linear_programming_simplex",
+  "name": "Linear Programming (Simplex / Interior-Point)",
+  "domain": "optimization",
+  "subdomain": "mathematical_programming",
+  "applicable_scenarios": [
+    "optimize a linear objective subject to linear equality and inequality constraints",
+    "resource allocation, production planning, diet problems, transportation",
+    "large sparse LPs with thousands of variables and constraints"
+  ],
+  "math_form": "\\min_x c^T x \\text{ s.t. } A_{ub} x \\le b_{ub}, \\; A_{eq} x = b_{eq}, \\; l \\le x \\le u",
+  "python_template": "import numpy as np\nfrom scipy.optimize import linprog\n\ndef solve_lp(c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, bounds=None):\n    res = linprog(\n        c=c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,\n        bounds=bounds, method='highs',\n    )\n    return res",
+  "typical_cases": [
+    "factory production mix to maximize profit",
+    "shipping goods from warehouses to customers at min cost",
+    "blending problem (diet, alloy, fuel)"
+  ],
+  "common_pitfalls": [
+    "unbounded or infeasible problems need careful status checks",
+    "mixing integer variables requires MILP (not LP); use PuLP / pyomo",
+    "numerical scaling matters; pre-normalize coefficients for HiGHS",
+    "the simplex method's worst case is exponential, though rare in practice"
+  ],
+  "keywords": [
+    "linear programming",
+    "LP",
+    "simplex",
+    "interior point",
+    "线性规划",
+    "单纯形",
+    "资源分配",
+    "运输问题"
+  ]
+}

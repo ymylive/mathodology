@@ -1,0 +1,32 @@
+{
+  "id": "convex_quadratic_programming",
+  "name": "Convex Quadratic Programming",
+  "domain": "optimization",
+  "subdomain": "mathematical_programming",
+  "applicable_scenarios": [
+    "minimize a positive-semidefinite quadratic objective under linear constraints",
+    "Markowitz portfolio optimization",
+    "SVM dual, least-squares with bound constraints"
+  ],
+  "math_form": "\\min_x \\tfrac{1}{2} x^T Q x + c^T x \\text{ s.t. } G x \\le h, \\; A x = b, \\; Q \\succeq 0",
+  "python_template": "import numpy as np\nimport cvxpy as cp\n\ndef solve_qp(Q, c, G=None, h=None, A=None, b=None):\n    n = Q.shape[0]\n    x = cp.Variable(n)\n    constraints = []\n    if G is not None:\n        constraints.append(G @ x <= h)\n    if A is not None:\n        constraints.append(A @ x == b)\n    obj = cp.Minimize(0.5 * cp.quad_form(x, cp.psd_wrap(Q)) + c @ x)\n    prob = cp.Problem(obj, constraints)\n    prob.solve()\n    return x.value, prob.value",
+  "typical_cases": [
+    "mean-variance portfolio selection",
+    "support vector machine training",
+    "model predictive control (MPC)"
+  ],
+  "common_pitfalls": [
+    "Q must be PSD; an indefinite Q makes the problem non-convex",
+    "large dense Q is memory-heavy; exploit structure (sparse / low-rank)",
+    "active-set methods scale poorly beyond ~10k variables; prefer OSQP"
+  ],
+  "keywords": [
+    "quadratic programming",
+    "QP",
+    "convex optimization",
+    "portfolio",
+    "二次规划",
+    "凸优化",
+    "投资组合"
+  ]
+}

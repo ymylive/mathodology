@@ -1,0 +1,34 @@
+{
+  "id": "pca",
+  "name": "Principal Component Analysis (PCA)",
+  "domain": "clustering_dimred",
+  "subdomain": "linear_dimensionality_reduction",
+  "applicable_scenarios": [
+    "reduce dimensionality of continuous data while preserving variance",
+    "de-correlate / whiten features before downstream models",
+    "visualize high-dimensional data in 2D / 3D"
+  ],
+  "math_form": "X = U \\Sigma V^T, \\; Z = X V_k",
+  "python_template": "import numpy as np\nfrom sklearn.decomposition import PCA\n\ndef pca_fit(X, n_components=2):\n    model = PCA(n_components=n_components)\n    Z = model.fit_transform(X)\n    return model, Z  # model.explained_variance_ratio_",
+  "typical_cases": [
+    "2D visualization of multivariate measurements",
+    "feature compression before clustering or classification",
+    "noise reduction in image / signal data"
+  ],
+  "common_pitfalls": [
+    "must standardize features of different scales before PCA",
+    "components are linear; curved manifolds need kernel PCA or t-SNE / UMAP",
+    "components are not interpretable features — rotated loadings help",
+    "explained-variance threshold is domain-dependent; plot the scree"
+  ],
+  "keywords": [
+    "PCA",
+    "principal component analysis",
+    "dimensionality reduction",
+    "SVD",
+    "whitening",
+    "主成分分析",
+    "降维",
+    "奇异值分解"
+  ]
+}

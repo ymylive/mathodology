@@ -1,0 +1,35 @@
+{
+  "id": "arima",
+  "name": "ARIMA (Autoregressive Integrated Moving Average)",
+  "domain": "time_series",
+  "subdomain": "linear_forecasting",
+  "applicable_scenarios": [
+    "short-horizon forecasting of a single stationary (or differenceable) series",
+    "modeling autocorrelation through AR, MA, and differencing terms",
+    "baseline for univariate time-series forecasting"
+  ],
+  "math_form": "\\phi(B)(1-B)^d y_t = \\theta(B)\\varepsilon_t",
+  "python_template": "import numpy as np\nfrom statsmodels.tsa.arima.model import ARIMA\n\ndef fit_arima(y, order=(1, 1, 1)):\n    model = ARIMA(y, order=order)\n    result = model.fit()\n    return result\n\ndef forecast_arima(result, steps=10):\n    return result.forecast(steps=steps)",
+  "typical_cases": [
+    "monthly sales forecasting",
+    "river flow or demand forecasting without strong seasonality",
+    "short-term stock / yield modeling"
+  ],
+  "common_pitfalls": [
+    "assumes (differenced) series is stationary; check with ADF / KPSS",
+    "over-differencing introduces spurious MA structure",
+    "seasonal data needs SARIMA (seasonal order) to avoid systematic error",
+    "model selection via AIC can overfit in small samples"
+  ],
+  "keywords": [
+    "ARIMA",
+    "time series",
+    "forecasting",
+    "autoregressive",
+    "ARMA",
+    "时间序列",
+    "预测",
+    "自回归",
+    "差分"
+  ]
+}

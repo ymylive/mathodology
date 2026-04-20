@@ -1,0 +1,32 @@
+{
+  "id": "lasso_regression",
+  "name": "Lasso Regression (L1 regularization)",
+  "domain": "optimization",
+  "subdomain": "linear_models",
+  "applicable_scenarios": [
+    "linear regression with automatic feature selection",
+    "sparse coefficient recovery when many predictors are irrelevant",
+    "high-dimensional problems where interpretability matters"
+  ],
+  "math_form": "\\hat{\\beta} = \\arg\\min_\\beta \\tfrac{1}{2n}\\|y - X\\beta\\|_2^2 + \\alpha \\|\\beta\\|_1",
+  "python_template": "import numpy as np\nfrom sklearn.linear_model import Lasso\n\ndef lasso_fit(X: np.ndarray, y: np.ndarray, alpha: float = 0.1) -> Lasso:\n    model = Lasso(alpha=alpha, max_iter=10000)\n    model.fit(X, y)\n    return model",
+  "typical_cases": [
+    "selecting a handful of biomarkers from thousands",
+    "sparse recovery in compressed sensing",
+    "variable selection in econometric panel data"
+  ],
+  "common_pitfalls": [
+    "requires feature scaling",
+    "with correlated predictors, Lasso arbitrarily picks one; consider ElasticNet",
+    "coordinate descent can be slow to converge without tuned max_iter"
+  ],
+  "keywords": [
+    "lasso",
+    "L1 regularization",
+    "sparse regression",
+    "feature selection",
+    "套索回归",
+    "稀疏回归",
+    "变量选择"
+  ]
+}

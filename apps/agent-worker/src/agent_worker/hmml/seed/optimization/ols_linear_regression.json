@@ -1,0 +1,35 @@
+{
+  "id": "ols_linear_regression",
+  "name": "Ordinary Least Squares (OLS) Linear Regression",
+  "domain": "optimization",
+  "subdomain": "linear_models",
+  "applicable_scenarios": [
+    "fit a linear relationship between a continuous response y and one or more predictors X",
+    "baseline model whenever residuals can reasonably be treated as iid Gaussian",
+    "closed-form parameter estimation on small-to-medium tabular data"
+  ],
+  "math_form": "\\hat{\\beta} = (X^T X)^{-1} X^T y",
+  "python_template": "import numpy as np\n\ndef ols_fit(X: np.ndarray, y: np.ndarray) -> np.ndarray:\n    # X shape (n, p). Add an intercept column if desired.\n    X1 = np.hstack([np.ones((X.shape[0], 1)), X])\n    beta, *_ = np.linalg.lstsq(X1, y, rcond=None)\n    return beta\n\ndef ols_predict(X: np.ndarray, beta: np.ndarray) -> np.ndarray:\n    X1 = np.hstack([np.ones((X.shape[0], 1)), X])\n    return X1 @ beta",
+  "typical_cases": [
+    "predict housing price from area and bedrooms",
+    "fit calibration curve for a sensor",
+    "relate advertising spend to sales"
+  ],
+  "common_pitfalls": [
+    "multicollinearity makes X^T X near-singular; prefer lstsq over inv",
+    "outliers dominate squared loss; inspect residuals before trusting beta",
+    "non-linear relationships yield biased fits; consider feature engineering or kernel methods",
+    "heteroscedastic residuals break the standard error formulas"
+  ],
+  "keywords": [
+    "linear regression",
+    "least squares",
+    "OLS",
+    "regression",
+    "最小二乘",
+    "线性回归",
+    "回归",
+    "拟合",
+    "normal equations"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "hierarchical_clustering",
+  "name": "Hierarchical (Agglomerative) Clustering",
+  "domain": "clustering_dimred",
+  "subdomain": "hierarchical_clustering",
+  "applicable_scenarios": [
+    "build a nested hierarchy (dendrogram) of clusters without fixing k up front",
+    "explore cluster structure at multiple granularities",
+    "small-to-medium datasets where a full distance matrix fits in memory"
+  ],
+  "math_form": "d(A, B) = \\min/\\max/\\text{avg}\\{d(a,b) : a \\in A, b \\in B\\}",
+  "python_template": "import numpy as np\nfrom scipy.cluster.hierarchy import linkage, fcluster\n\ndef hier_fit(X, method='ward'):\n    # method in {'single','complete','average','ward'}\n    Z = linkage(X, method=method)\n    return Z\n\ndef flat_labels(Z, k):\n    return fcluster(Z, t=k, criterion='maxclust')",
+  "typical_cases": [
+    "phylogenetic / taxonomy-style clustering",
+    "document clustering for exploratory analysis",
+    "gene expression dendrograms"
+  ],
+  "common_pitfalls": [
+    "O(n^2) memory for the distance matrix; doesn't scale beyond ~50k points",
+    "ward linkage implicitly assumes Euclidean distance and spherical clusters",
+    "linkage choice changes results dramatically; single linkage chains noisy clusters",
+    "dendrogram cut height is subjective; justify k via silhouette"
+  ],
+  "keywords": [
+    "hierarchical clustering",
+    "agglomerative",
+    "linkage",
+    "dendrogram",
+    "ward",
+    "层次聚类",
+    "聚类",
+    "树状图",
+    "凝聚"
+  ]
+}

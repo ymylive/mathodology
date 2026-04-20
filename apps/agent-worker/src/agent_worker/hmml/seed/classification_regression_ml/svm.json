@@ -1,0 +1,35 @@
+{
+  "id": "svm",
+  "name": "Support Vector Machine (SVM)",
+  "domain": "classification_regression_ml",
+  "subdomain": "kernel_methods",
+  "applicable_scenarios": [
+    "margin-based binary classification on small-to-medium data",
+    "non-linear separation via kernel functions (RBF, polynomial)",
+    "regression with epsilon-insensitive loss (SVR)"
+  ],
+  "math_form": "\\min_{w,b,\\xi} \\tfrac{1}{2}\\|w\\|^2 + C \\sum_i \\xi_i \\text{ s.t. } y_i(w^T \\phi(x_i) + b) \\ge 1 - \\xi_i, \\; \\xi_i \\ge 0",
+  "python_template": "import numpy as np\nfrom sklearn.svm import SVC, SVR\n\ndef fit_svc(X, y, C=1.0, kernel='rbf', gamma='scale'):\n    model = SVC(C=C, kernel=kernel, gamma=gamma, probability=True)\n    model.fit(X, y)\n    return model\n\ndef fit_svr(X, y, C=1.0, epsilon=0.1, kernel='rbf'):\n    model = SVR(C=C, epsilon=epsilon, kernel=kernel)\n    model.fit(X, y)\n    return model",
+  "typical_cases": [
+    "handwritten digit classification with modest n",
+    "text classification with sparse features + linear kernel",
+    "bioinformatics classification on small gene-expression datasets"
+  ],
+  "common_pitfalls": [
+    "O(n^2)-O(n^3) training; doesn't scale past ~100k samples without approximation",
+    "requires feature scaling, especially for RBF",
+    "probability estimates require extra Platt scaling (slow, noisier)",
+    "multi-class is emulated via one-vs-rest — large K gets expensive"
+  ],
+  "keywords": [
+    "SVM",
+    "support vector machine",
+    "kernel",
+    "margin",
+    "RBF",
+    "支持向量机",
+    "核方法",
+    "分类",
+    "SVR"
+  ]
+}

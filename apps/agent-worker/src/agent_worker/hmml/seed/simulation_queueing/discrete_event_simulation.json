@@ -1,0 +1,35 @@
+{
+  "id": "discrete_event_simulation",
+  "name": "Discrete-Event Simulation (DES)",
+  "domain": "simulation_queueing",
+  "subdomain": "system_simulation",
+  "applicable_scenarios": [
+    "simulate systems whose state changes at discrete events (arrivals, completions, failures)",
+    "complex queueing networks that defy closed-form analysis",
+    "manufacturing / logistics / hospital throughput studies"
+  ],
+  "math_form": "S(t^+) = \\delta(S(t^-), e),\\; t_{\\text{next}} = \\min_{e \\in E} t_e",
+  "python_template": "import heapq\n\ndef simulate(events0, handlers, end_time):\n    # events0: list[(time, event_type, payload)]\n    # handlers: dict[event_type, callable(state, time, payload) -> list[(time, event_type, payload)]]\n    q = list(events0)\n    heapq.heapify(q)\n    state = {}\n    trace = []\n    while q:\n        t, et, payload = heapq.heappop(q)\n        if t > end_time:\n            break\n        trace.append((t, et, payload))\n        for new_ev in handlers[et](state, t, payload):\n            heapq.heappush(q, new_ev)\n    return state, trace",
+  "typical_cases": [
+    "airport security throughput simulation",
+    "hospital ER patient flow",
+    "warehouse order-picking and shipping pipeline"
+  ],
+  "common_pitfalls": [
+    "results are stochastic; always run multiple replications and report CIs",
+    "warm-up period bias — discard initial transient before collecting statistics",
+    "rare events need long runs or importance-sampling variants",
+    "random-number stream management is critical for reproducible experiments"
+  ],
+  "keywords": [
+    "discrete event simulation",
+    "DES",
+    "simulation",
+    "event queue",
+    "SimPy",
+    "离散事件仿真",
+    "离散事件",
+    "仿真",
+    "排队网络"
+  ]
+}

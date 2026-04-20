@@ -1,0 +1,34 @@
+{
+  "id": "simulated_annealing",
+  "name": "Simulated Annealing (SA)",
+  "domain": "optimization",
+  "subdomain": "metaheuristics",
+  "applicable_scenarios": [
+    "single-solution metaheuristic for combinatorial or continuous optimization",
+    "problems with many local minima where escaping them is important",
+    "scheduling, placement, and layout problems"
+  ],
+  "math_form": "P(\\text{accept } x') = \\min\\bigl(1, \\exp(-(f(x') - f(x)) / T)\\bigr)",
+  "python_template": "import numpy as np\n\ndef simulated_annealing(f, x0, neighbor, T0=1.0, alpha=0.995, n_iter=10000, rng=None):\n    rng = rng or np.random.default_rng(0)\n    x, fx = x0, f(x0)\n    best, fbest = x, fx\n    T = T0\n    for _ in range(n_iter):\n        xp = neighbor(x, rng)\n        fp = f(xp)\n        if fp < fx or rng.random() < np.exp(-(fp - fx) / max(T, 1e-12)):\n            x, fx = xp, fp\n            if fx < fbest:\n                best, fbest = x, fx\n        T *= alpha\n    return best, fbest",
+  "typical_cases": [
+    "traveling salesman with 2-opt neighborhoods",
+    "job-shop scheduling",
+    "sensor placement and facility location"
+  ],
+  "common_pitfalls": [
+    "cooling schedule dominates quality; too fast → local minima, too slow → wasted compute",
+    "requires a problem-specific neighborhood operator",
+    "stochastic; budget multiple runs and pick the best",
+    "no gradient information used — dense continuous problems may prefer L-BFGS"
+  ],
+  "keywords": [
+    "simulated annealing",
+    "SA",
+    "metropolis",
+    "metaheuristic",
+    "模拟退火",
+    "启发式",
+    "全局优化",
+    "组合优化"
+  ]
+}

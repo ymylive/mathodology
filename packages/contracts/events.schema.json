@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mathodology.dev/schemas/events.schema.json",
+  "title": "AgentEvent",
+  "description": "Envelope for every event flowing through `mm:events:<run_id>` Redis stream and the WS channel. Seq is monotonic per run (gateway-assigned or client-replayable).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "kind", "seq", "ts"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "agent": {
+      "type": ["string", "null"],
+      "enum": ["analyzer", "modeler", "coder", "writer", "critic", "searcher", null]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "stage.start",
+        "stage.done",
+        "log",
+        "token",
+        "cost",
+        "kernel.stdout",
+        "kernel.figure",
+        "error",
+        "done"
+      ]
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Kind-specific body. See per-kind shapes below."
+    }
+  },
+  "$defs": {
+    "stageStart": {
+      "type": "object",
+      "required": ["stage"],
+      "properties": {
+        "stage": { "type": "string" }
+      }
+    },
+    "stageDone": {
+      "type": "object",
+      "required": ["stage"],
+      "properties": {
+        "stage": { "type": "string" },
+        "duration_ms": { "type": "integer" }
+      }
+    },
+    "log": {
+      "type": "object",
+      "required": ["level", "message"],
+      "properties": {
+        "level": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+        "message": { "type": "string" }
+      }
+    },
+    "token": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "model": { "type": "string" }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["run_total_rmb"],
+      "properties": {
+        "run_total_rmb": { "type": "number" },
+        "delta_rmb": { "type": "number" },
+        "model": { "type": "string" },
+        "prompt_tokens": { "type": "integer" },
+        "completion_tokens": { "type": "integer" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string" },
+        "code": { "type": "string" },
+        "stage": { "type": "string" }
+      }
+    },
+    "done": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["success", "failed", "cancelled"] },
+        "notebook_path": { "type": "string" },
+        "paper_path": { "type": "string" },
+        "cost_rmb": { "type": "number" }
+      }
+    }
+  }
+}

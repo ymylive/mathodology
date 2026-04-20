@@ -1,0 +1,3 @@
+gateway: cargo watch -x 'run -p gateway'
+worker:  uv run arq agent_worker.main.WorkerSettings --watch apps/agent-worker/src
+web:     pnpm --filter web dev

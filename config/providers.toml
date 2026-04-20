@@ -1,0 +1,52 @@
+# LLM provider registry. Loaded by the Rust gateway at startup, hot-reloadable via SIGHUP.
+# API keys are read from env vars named by api_key_env; they do NOT live in this file.
+# price_* fields are RMB per 1M tokens.
+
+[[providers]]
+name = "deepseek"
+kind = "openai_compat"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+models = ["deepseek-chat", "deepseek-reasoner"]
+price_input_per_1m = 1.0
+price_output_per_1m = 2.0
+
+[[providers]]
+name = "moonshot"
+kind = "openai_compat"
+base_url = "https://api.moonshot.cn/v1"
+api_key_env = "MOONSHOT_API_KEY"
+models = ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
+price_input_per_1m = 12.0
+price_output_per_1m = 12.0
+
+[[providers]]
+name = "openai"
+kind = "openai_compat"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+models = ["gpt-4o", "gpt-4o-mini", "o3-mini"]
+price_input_per_1m = 18.0
+price_output_per_1m = 72.0
+
+[[providers]]
+name = "anthropic"
+kind = "anthropic"
+base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_API_KEY"
+models = ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"]
+price_input_per_1m = 22.0
+price_output_per_1m = 110.0
+
+[[providers]]
+name = "ollama_local"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:11434/v1"
+api_key_env = ""
+models = ["qwen2.5-coder:32b", "llama3.1:8b"]
+price_input_per_1m = 0.0
+price_output_per_1m = 0.0
+
+[router]
+default_model = "deepseek-chat"
+fallback = ["deepseek-chat", "moonshot-v1-32k"]

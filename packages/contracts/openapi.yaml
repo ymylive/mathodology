@@ -1,0 +1,213 @@
+openapi: 3.1.0
+info:
+  title: Mathodology Gateway API
+  version: 0.1.0
+  description: |
+    Rust gateway exposes three surfaces:
+    1. REST for run CRUD and health.
+    2. A transparent OpenAI-compatible `/llm/chat/completions` (internal use by agent workers, plus 3rd-party passthrough).
+    3. WebSocket `/ws/runs/{run_id}` for streaming run events (schema: events.schema.json).
+
+servers:
+  - url: http://127.0.0.1:8080
+
+security:
+  - DevToken: []
+
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /runs:
+    post:
+      summary: Create a new run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProblemInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunCreated" }
+
+  /runs/{run_id}:
+    get:
+      summary: Get run state + event history
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "404": { description: Not found }
+
+  /llm/chat/completions:
+    post:
+      summary: OpenAI-compatible chat completions (passthrough to configured providers)
+      description: |
+        Body mirrors OpenAI's chat/completions schema. When `stream=true` returns SSE.
+        Set `X-Run-Id` and `X-Agent` headers so the gateway tags cost accounting and
+        fans tokens into the matching WS run stream.
+      parameters:
+        - in: header
+          name: X-Run-Id
+          required: false
+          schema: { type: string, format: uuid }
+        - in: header
+          name: X-Agent
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatCompletionRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatCompletionResponse" }
+            text/event-stream:
+              schema: { type: string }
+
+components:
+  securitySchemes:
+    DevToken:
+      type: http
+      scheme: bearer
+      bearerFormat: DEV_AUTH_TOKEN
+
+  schemas:
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+        redis_ok: { type: boolean }
+        postgres_ok: { type: boolean }
+
+    ProblemInput:
+      type: object
+      required: [problem_text]
+      properties:
+        problem_text: { type: string, minLength: 1 }
+        competition_type:
+          type: string
+          enum: [mcm, icm, cumcm, huashu, other]
+          default: other
+        attachments:
+          type: array
+          items: { $ref: "#/components/schemas/Attachment" }
+        model_override:
+          type: string
+          description: Force a specific model; otherwise router picks per-agent defaults.
+
+    Attachment:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [csv, xlsx, pdf, image, text] }
+        content_base64: { type: string }
+
+    RunCreated:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued] }
+
+    Run:
+      type: object
+      required: [run_id, status, created_at]
+      properties:
+        run_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, done, failed, cancelled] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        problem_text: { type: string }
+        cost_rmb: { type: number }
+        notebook_path: { type: string }
+        paper_path: { type: string }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/AgentEvent" }
+
+    AgentEvent:
+      type: object
+      required: [run_id, kind, seq, ts]
+      properties:
+        run_id: { type: string, format: uuid }
+        agent:
+          type: string
+          nullable: true
+          enum: [analyzer, modeler, coder, writer, critic, searcher, null]
+        kind:
+          type: string
+          enum: [stage.start, stage.done, log, token, cost, kernel.stdout, kernel.figure, error, done]
+        seq: { type: integer, minimum: 0 }
+        ts: { type: string, format: date-time }
+        payload: { type: object, additionalProperties: true }
+
+    ChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model: { type: string }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/ChatMessage" }
+        temperature: { type: number, default: 0.2 }
+        max_tokens: { type: integer }
+        stream: { type: boolean, default: false }
+        response_format:
+          type: object
+          additionalProperties: true
+
+    ChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role: { type: string, enum: [system, user, assistant, tool] }
+        content: { type: string }
+        name: { type: string }
+
+    ChatCompletionResponse:
+      type: object
+      required: [id, model, choices]
+      properties:
+        id: { type: string }
+        model: { type: string }
+        created: { type: integer }
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              message: { $ref: "#/components/schemas/ChatMessage" }
+              finish_reason: { type: string }
+        usage:
+          type: object
+          properties:
+            prompt_tokens: { type: integer }
+            completion_tokens: { type: integer }
+            total_tokens: { type: integer }

@@ -1,0 +1,44 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Python
+.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+**/.ipynb_checkpoints/
+
+# Node / pnpm
+**/node_modules/
+**/dist/
+**/.turbo/
+.pnpm-store/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Local data
+*.db
+*.sqlite*
+/runs/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Generated
+packages/py-contracts/src/mm_contracts/generated.py
+packages/ts-contracts/src/generated.ts
+
+# Docker volumes
+/docker-data/

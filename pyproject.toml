@@ -1,0 +1,17 @@
+[tool.uv.workspace]
+members = ["apps/agent-worker", "packages/py-contracts"]
+
+[tool.uv.sources]
+mm-contracts = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "packages/py-contracts/src/mm_contracts/generated.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

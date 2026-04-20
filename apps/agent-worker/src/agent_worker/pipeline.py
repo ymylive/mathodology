@@ -1,29 +1,36 @@
-"""M1 fake pipeline: emits three events and returns."""
+"""M4 pipeline: run the Analyzer agent, then emit `done`."""
 
 from __future__ import annotations
 
-import asyncio
 from uuid import UUID
 
 from mm_contracts import ProblemInput
 from redis.asyncio import Redis
 
+from agent_worker.agents import AgentError, AnalyzerAgent
+from agent_worker.config import get_settings
 from agent_worker.events import EventEmitter
+from agent_worker.gateway_client import GatewayClient
 
 
 async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> None:
-    """Minimal three-event pipeline for M1.
+    """Run the pipeline for a single problem.
 
-    Emits `stage.start(analyzer)`, `stage.start(modeler)`, then `done`.
-    No real work — this is a wiring test from gateway → worker → WS.
+    M4 only wires up the Analyzer stage. Subsequent milestones will chain
+    Modeler → Coder → Writer. The `done` event's status reflects whether the
+    agent chain succeeded; per-stage errors are emitted by `BaseAgent`.
     """
-    del problem  # unused in M1
+    settings = get_settings()
     emitter = EventEmitter(redis, run_id)
+    gateway = GatewayClient(settings.gateway_http, settings.dev_auth_token)
 
-    await emitter.emit("stage.start", {"stage": "analyzer"}, agent="analyzer")
-    await asyncio.sleep(0.2)
-
-    await emitter.emit("stage.start", {"stage": "modeler"}, agent="modeler")
-    await asyncio.sleep(0.2)
-
-    await emitter.emit("done", {"status": "success"}, agent=None)
+    try:
+        analyzer = AnalyzerAgent(gateway, emitter)
+        try:
+            await analyzer.run_for_problem(problem)
+            await emitter.emit("done", {"status": "success"}, agent=None)
+        except AgentError:
+            # BaseAgent already emitted the stage `error`; mark the run failed.
+            await emitter.emit("done", {"status": "failed"}, agent=None)
+    finally:
+        await gateway.close()

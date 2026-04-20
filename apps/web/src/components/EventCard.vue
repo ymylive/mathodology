@@ -11,9 +11,10 @@ const shortTs = computed(() => {
   return d.toISOString().slice(11, 23);
 });
 
-// Per-kind badge color. `token` is intentionally filtered out at the parent
-// level (see HomeView + store.isFeedVisible), but we also early-return here as
-// defense-in-depth so a stray `token` event never leaks into the feed.
+// Per-kind badge color. `token` and `agent.output` are filtered out at the
+// store / feed level (see FEED_HIDDEN_KINDS + isFeedVisible); we also
+// early-return here as defense-in-depth so a stray chatty event never leaks
+// into the feed.
 const kindClass = computed(() => {
   switch (props.event.kind) {
     case "error":
@@ -69,7 +70,13 @@ const summary = computed(() => {
     case "stage.done": {
       const stage = (p as { stage?: string }).stage;
       const dur = (p as { duration_ms?: number }).duration_ms;
-      if (typeof dur === "number") return `${stage ?? ""} (${dur}ms)`;
+      if (typeof dur === "number") {
+        // Format durations >= 1s as seconds with one decimal; sub-second
+        // stays in ms so short LLM turns still read naturally.
+        const label =
+          dur >= 1000 ? `${(dur / 1000).toFixed(1)} s` : `${dur} ms`;
+        return `${stage ?? ""} (${label})`;
+      }
       return stage ?? "";
     }
     case "log": {
@@ -122,9 +129,10 @@ const truncatedSummary = computed(() => {
 </script>
 
 <template>
-  <!-- Defense-in-depth: token events should never hit this component, but
-       if one slips through we render nothing rather than spam the feed. -->
-  <template v-if="event.kind !== 'token'">
+  <!-- Defense-in-depth: `token` and `agent.output` events should never hit
+       this component (they're filtered in HomeView + store.isFeedVisible),
+       but if one slips through we render nothing rather than spam the feed. -->
+  <template v-if="event.kind !== 'token' && event.kind !== 'agent.output'">
     <div class="flex items-start gap-3 px-3 py-2 border-b border-neutral-800">
       <span class="mono text-xs text-neutral-500 shrink-0 w-[96px] tabular-nums">
         {{ shortTs }}

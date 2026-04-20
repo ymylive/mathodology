@@ -59,6 +59,7 @@ EventKind = Literal[
     "log",
     "token",
     "cost",
+    "agent.output",
     "kernel.stdout",
     "kernel.figure",
     "error",
@@ -103,10 +104,36 @@ class TokenUsage(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class AnalyzerOutput(BaseModel):
-    """Analyzer agent output. Stub for M1."""
+class DataRequirement(BaseModel):
+    """One piece of data the solver will need, with an optional source hint."""
 
-    summary: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str
+    source_hint: str | None = None  # "kaggle", "dataset.gov", or a URL
+
+
+class ApproachSketch(BaseModel):
+    """A candidate modeling approach the Modeler can choose from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    rationale: str
+    methods: list[str] = Field(default_factory=list, max_length=10)
+
+
+class AnalyzerOutput(BaseModel):
+    """Analyzer agent output: scope + sub-questions + approach sketches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    restated_problem: str = Field(min_length=10)
+    sub_questions: list[str] = Field(min_length=1, max_length=10)
+    assumptions: list[str] = Field(default_factory=list, max_length=15)
+    data_requirements: list[DataRequirement] = Field(default_factory=list, max_length=10)
+    proposed_approaches: list[ApproachSketch] = Field(min_length=1, max_length=3)
 
 
 class ModelSpec(BaseModel):

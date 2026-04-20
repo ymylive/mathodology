@@ -26,6 +26,16 @@ export interface AgentUsage {
   costRmb: number;
 }
 
+// Latest structured output emitted by an agent (from `agent.output` events).
+// One entry per agent; later `agent.output` events overwrite the previous
+// one so the view always shows the most recent parsed result.
+export interface AgentOutput {
+  schemaName: string;
+  output: Record<string, unknown>;
+  durationMs: number | null;
+  ts: string;
+}
+
 interface State {
   runId: string | null;
   status: RunStatus;
@@ -35,10 +45,14 @@ interface State {
   wsConnected: boolean;
   tokens: Record<string, AgentStream>;
   usage: Record<string, AgentUsage>;
+  outputs: Record<string, AgentOutput>;
 }
 
-// Events we never push into the feed (too noisy / handled elsewhere).
-const FEED_HIDDEN_KINDS = new Set(["token"]);
+// Events we never push into the feed. `token` is chatty and folded into the
+// stream buffer; `agent.output` is captured into `outputs` and rendered in a
+// dedicated card, so it stays out of the feed to avoid duplicating the
+// `stage.done` that follows.
+const FEED_HIDDEN_KINDS = new Set(["token", "agent.output"]);
 
 // Agent key used for events with a null `agent` field. Keeps the record keys
 // stringly-typed so Vue can reactively track them.
@@ -66,6 +80,7 @@ export const useRunStore = defineStore("run", {
     wsConnected: false,
     tokens: {},
     usage: {},
+    outputs: {},
   }),
 
   getters: {
@@ -89,6 +104,7 @@ export const useRunStore = defineStore("run", {
       this.wsConnected = false;
       this.tokens = {};
       this.usage = {};
+      this.outputs = {};
     },
 
     async startRun(problemText: string) {
@@ -149,6 +165,32 @@ export const useRunStore = defineStore("run", {
           model:
             typeof payload.model === "string" ? payload.model : existing.model,
           updatedAt: ev.ts,
+        };
+        return;
+      }
+
+      // `agent.output` carries the structured Pydantic result. We stash it
+      // per-agent and keep it out of the feed — the immediately-following
+      // `stage.done` already marks the boundary there.
+      if (ev.kind === "agent.output") {
+        const p = ev.payload as {
+          schema_name?: unknown;
+          output?: unknown;
+          duration_ms?: unknown;
+        };
+        const schemaName =
+          typeof p.schema_name === "string" ? p.schema_name : "unknown";
+        const output =
+          p.output && typeof p.output === "object" && !Array.isArray(p.output)
+            ? (p.output as Record<string, unknown>)
+            : {};
+        const durationMs =
+          typeof p.duration_ms === "number" ? p.duration_ms : null;
+        this.outputs[agentKey] = {
+          schemaName,
+          output,
+          durationMs,
+          ts: ev.ts,
         };
         return;
       }

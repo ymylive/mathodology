@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,7 +21,8 @@ class Settings(BaseSettings):
 
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     gateway_http: str = Field(
-        default="http://127.0.0.1:8080", alias="VITE_GATEWAY_HTTP"
+        default="http://127.0.0.1:8080",
+        validation_alias=AliasChoices("GATEWAY_HTTP", "VITE_GATEWAY_HTTP"),
     )
     dev_auth_token: str = Field(
         default="dev-local-insecure-token", alias="DEV_AUTH_TOKEN"

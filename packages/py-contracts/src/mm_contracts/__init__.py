@@ -3,8 +3,10 @@
 from mm_contracts.agent_io import (
     AgentEvent,
     AnalyzerOutput,
+    ApproachSketch,
     Attachment,
     CoderOutput,
+    DataRequirement,
     ModelSpec,
     PaperDraft,
     ProblemInput,
@@ -15,8 +17,10 @@ from mm_contracts.agent_io import (
 __all__ = [
     "AgentEvent",
     "AnalyzerOutput",
+    "ApproachSketch",
     "Attachment",
     "CoderOutput",
+    "DataRequirement",
     "ModelSpec",
     "PaperDraft",
     "ProblemInput",

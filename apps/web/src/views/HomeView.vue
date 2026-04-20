@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { isFeedVisible, useRunStore } from "@/stores/run";
 import EventCard from "@/components/EventCard.vue";
 import AgentStreamCard from "@/components/AgentStreamCard.vue";
+import AgentOutputCard from "@/components/AgentOutputCard.vue";
 import CostMeter from "@/components/CostMeter.vue";
 
 const store = useRunStore();
@@ -60,6 +61,7 @@ const streamAgents = computed(() => {
   const keys = new Set<string>([
     ...Object.keys(store.tokens),
     ...Object.keys(store.usage),
+    ...Object.keys(store.outputs),
   ]);
   const arr = Array.from(keys);
   arr.sort((a, b) => {
@@ -210,15 +212,26 @@ async function run() {
             Live agent streams will appear here once a run starts.
           </p>
         </div>
-        <AgentStreamCard
+        <div
           v-for="agent in streamAgents"
           :key="agent"
-          :agent="agent"
-          :text="store.tokens[agent]?.text ?? ''"
-          :model="store.tokens[agent]?.model ?? null"
-          :usage="store.usage[agent] ?? null"
-          :active="activeAgents.has(agent)"
-        />
+          class="space-y-2"
+        >
+          <AgentStreamCard
+            :agent="agent"
+            :text="store.tokens[agent]?.text ?? ''"
+            :model="store.tokens[agent]?.model ?? null"
+            :usage="store.usage[agent] ?? null"
+            :active="activeAgents.has(agent)"
+          />
+          <AgentOutputCard
+            v-if="store.outputs[agent]"
+            :agent="agent"
+            :schema-name="store.outputs[agent].schemaName"
+            :output="store.outputs[agent].output"
+            :duration-ms="store.outputs[agent].durationMs"
+          />
+        </div>
       </section>
     </div>
   </div>

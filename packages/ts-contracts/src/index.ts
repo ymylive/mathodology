@@ -8,6 +8,7 @@ export type EventKind =
   | "log"
   | "token"
   | "cost"
+  | "agent.output"
   | "kernel.stdout"
   | "kernel.figure"
   | "error"

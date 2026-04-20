@@ -29,6 +29,11 @@ class EventEmitter:
         self._seq_key = f"mm:seq:{run_id}"
         self._seq = 0
 
+    @property
+    def run_id(self) -> UUID:
+        """Public accessor for the run UUID (used by agents to tag LLM calls)."""
+        return self._run_id
+
     async def emit(
         self,
         kind: str,

@@ -23,6 +23,7 @@
         "log",
         "token",
         "cost",
+        "agent.output",
         "kernel.stdout",
         "kernel.figure",
         "error",
@@ -83,6 +84,16 @@
         "model": { "type": "string" },
         "prompt_tokens": { "type": "integer" },
         "completion_tokens": { "type": "integer" }
+      }
+    },
+    "agentOutput": {
+      "type": "object",
+      "description": "Structured Pydantic output from an agent (parsed from LLM response_format=json_schema). Fired once per agent after the stream ends.",
+      "required": ["schema_name", "output"],
+      "properties": {
+        "schema_name": { "type": "string", "description": "Pydantic model name, e.g. AnalyzerOutput" },
+        "output": { "type": "object", "description": "The structured output, serialized per the named schema." },
+        "duration_ms": { "type": "integer" }
       }
     },
     "error": {

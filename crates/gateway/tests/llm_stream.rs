@@ -94,6 +94,15 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         .await
         .expect("postgres connect");
 
+    // LLM-stream test doesn't hit the figures routes, but AppState now
+    // requires a canonical runs_dir. Point at an ephemeral tempdir.
+    let runs_tmp = tempfile::tempdir().expect("runs tempdir");
+    let runs_dir = tokio::fs::canonicalize(runs_tmp.path())
+        .await
+        .expect("canonicalize runs tempdir");
+    // Leak the TempDir so it outlives the test; it's ephemeral anyway.
+    std::mem::forget(runs_tmp);
+
     let cfg = AppConfig {
         host: "127.0.0.1".into(),
         port: 0,
@@ -101,6 +110,7 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         redis_url,
         database_url,
         providers_path: providers_path.clone(),
+        runs_dir: runs_dir.clone(),
     };
     let llm =
         LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
@@ -110,6 +120,7 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         pg,
         config: Arc::new(cfg),
         llm,
+        runs_dir: Arc::new(runs_dir),
     }
 }
 

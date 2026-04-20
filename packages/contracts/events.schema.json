@@ -96,6 +96,27 @@
         "duration_ms": { "type": "integer" }
       }
     },
+    "kernelStdout": {
+      "type": "object",
+      "description": "Text output from the Jupyter kernel (stdout or stderr).",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "name": { "type": "string", "enum": ["stdout", "stderr"] },
+        "cell_index": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "kernelFigure": {
+      "type": "object",
+      "description": "Figure produced by a kernel cell. Written to disk by the worker; UI loads via GET /runs/:id/figures/<path>.",
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "description": "Relative path under the run directory, e.g. figures/fig-0.png" },
+        "cell_index": { "type": "integer", "minimum": 0 },
+        "format": { "type": "string", "enum": ["png", "svg", "jpeg"] },
+        "inline_base64": { "type": "string", "description": "Optional small preview; for large figures prefer reading `path`." }
+      }
+    },
     "error": {
       "type": "object",
       "required": ["message"],

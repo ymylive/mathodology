@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { workspace = true }
+tokio-util = { version = "0.7", features = ["io"] }
 axum = { workspace = true }
 axum-extra = { version = "0.9", features = ["query", "typed-header"] }
 tower = { workspace = true }

@@ -10,6 +10,10 @@ pub struct AppConfig {
     pub redis_url: String,
     pub database_url: String,
     pub providers_path: PathBuf,
+    /// Filesystem root where the Python worker writes run artifacts
+    /// (`<runs_dir>/<run_id>/figures/*.png`, `<runs_dir>/<run_id>/notebook.ipynb`).
+    /// Raw value from `RUNS_DIR`; the canonicalized form lives on `AppState`.
+    pub runs_dir: PathBuf,
 }
 
 impl AppConfig {
@@ -28,6 +32,9 @@ impl AppConfig {
         let providers_path = std::env::var("PROVIDERS_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("config/providers.toml"));
+        let runs_dir = std::env::var("RUNS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("./runs"));
 
         Ok(Self {
             host,
@@ -36,6 +43,7 @@ impl AppConfig {
             redis_url,
             database_url,
             providers_path,
+            runs_dir,
         })
     }
 }

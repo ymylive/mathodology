@@ -142,10 +142,32 @@ class ModelSpec(BaseModel):
     name: str = ""
 
 
-class CoderOutput(BaseModel):
-    """Coder agent output. Stub for M1."""
+class CellExecution(BaseModel):
+    """One executed notebook cell captured from the Jupyter kernel."""
 
-    notebook_path: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    source: str
+    stdout: str = ""
+    stderr: str = ""
+    result_text: str | None = None  # text/plain repr of the last expression
+    figure_paths: list[str] = Field(
+        default_factory=list
+    )  # relative to run dir, e.g. figures/fig-0.png
+    error: str | None = None  # kernel error message, if any
+    duration_ms: int = 0
+
+
+class CoderOutput(BaseModel):
+    """Coder agent output: executed cells, saved figures, final summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cells: list[CellExecution]
+    figure_paths: list[str] = Field(default_factory=list)
+    final_summary: str  # plain-text final answer from the agent
+    notebook_path: str  # absolute path to the written .ipynb
 
 
 class PaperDraft(BaseModel):

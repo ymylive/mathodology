@@ -1,8 +1,34 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { AgentEvent } from "@mathodology/contracts";
+import { useRunStore } from "@/stores/run";
+import { figureUrl } from "@/api/figures";
 
 const props = defineProps<{ event: AgentEvent }>();
+
+const store = useRunStore();
+
+// Cell-boundary log pattern — mirrors the store's regex. Matching these
+// renders a "Cell N ▶" pill instead of the raw "[info] executing cell N".
+const EXECUTING_CELL_RE = /^executing cell (\d+)$/;
+
+const executingCellIndex = computed<number | null>(() => {
+  if (props.event.kind !== "log") return null;
+  const p = props.event.payload as { message?: unknown };
+  if (typeof p.message !== "string") return null;
+  const m = EXECUTING_CELL_RE.exec(p.message);
+  if (!m) return null;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isNaN(n) ? null : n;
+});
+
+const figureInfo = computed<{ path: string; src: string } | null>(() => {
+  if (props.event.kind !== "kernel.figure") return null;
+  const p = props.event.payload as { path?: unknown };
+  const path = typeof p.path === "string" ? p.path : "";
+  if (!path || !store.runId) return null;
+  return { path, src: figureUrl(store.runId, path) };
+});
 
 const shortTs = computed(() => {
   // ISO 8601 → HH:MM:SS.mmm (local-ish, trimmed).
@@ -129,10 +155,17 @@ const truncatedSummary = computed(() => {
 </script>
 
 <template>
-  <!-- Defense-in-depth: `token` and `agent.output` events should never hit
-       this component (they're filtered in HomeView + store.isFeedVisible),
-       but if one slips through we render nothing rather than spam the feed. -->
-  <template v-if="event.kind !== 'token' && event.kind !== 'agent.output'">
+  <!-- Defense-in-depth: `token`, `agent.output`, and `kernel.stdout` events
+       should never hit this component (they're filtered in HomeView +
+       store.isFeedVisible), but if one slips through we render nothing
+       rather than spam the feed. -->
+  <template
+    v-if="
+      event.kind !== 'token' &&
+      event.kind !== 'agent.output' &&
+      event.kind !== 'kernel.stdout'
+    "
+  >
     <div class="flex items-start gap-3 px-3 py-2 border-b border-neutral-800">
       <span class="mono text-xs text-neutral-500 shrink-0 w-[96px] tabular-nums">
         {{ shortTs }}
@@ -153,7 +186,44 @@ const truncatedSummary = computed(() => {
       >
         {{ event.agent }}
       </span>
-      <span class="text-sm text-neutral-200 break-words min-w-0 whitespace-pre-wrap">
+
+      <!-- Cell-boundary log: dedicated pill instead of the raw text. -->
+      <span
+        v-if="executingCellIndex !== null"
+        class="mono text-[11px] px-1.5 py-0.5 rounded border border-violet-900 bg-violet-950/60 text-violet-300 inline-flex items-center gap-1"
+      >
+        <span aria-hidden="true">▶</span>
+        <span>Cell {{ executingCellIndex }}</span>
+      </span>
+
+      <!-- Figure: inline thumbnail next to its path. -->
+      <template v-else-if="figureInfo">
+        <a
+          :href="figureInfo.src"
+          target="_blank"
+          rel="noopener"
+          class="block shrink-0 rounded border border-neutral-800 bg-neutral-950/60 overflow-hidden hover:border-fuchsia-700"
+          :aria-label="`Open figure ${figureInfo.path}`"
+        >
+          <img
+            :src="figureInfo.src"
+            :alt="figureInfo.path"
+            class="block w-[60px] h-[45px] object-contain bg-neutral-950"
+            loading="lazy"
+          />
+        </a>
+        <span
+          class="mono text-xs text-neutral-300 break-all min-w-0 truncate"
+          :title="figureInfo.path"
+        >
+          {{ figureInfo.path }}
+        </span>
+      </template>
+
+      <span
+        v-else
+        class="text-sm text-neutral-200 break-words min-w-0 whitespace-pre-wrap"
+      >
         {{ truncatedSummary }}
       </span>
     </div>

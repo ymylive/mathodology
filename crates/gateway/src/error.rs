@@ -9,11 +9,20 @@ pub enum AppError {
     #[error("unauthorized")]
     Unauthorized,
 
+    #[error("forbidden")]
+    Forbidden,
+
     #[error("bad request: {0}")]
     BadRequest(String),
 
     #[error("not found")]
     NotFound,
+
+    #[error("unsupported media type")]
+    UnsupportedMediaType,
+
+    #[error("payload too large")]
+    PayloadTooLarge,
 
     #[error("internal error: {0}")]
     Internal(String),
@@ -23,8 +32,14 @@ impl AppError {
     fn status_and_code(&self) -> (StatusCode, &'static str) {
         match self {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            AppError::UnsupportedMediaType => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_media_type",
+            ),
+            AppError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
     }

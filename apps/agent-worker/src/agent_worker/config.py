@@ -28,6 +28,7 @@ class Settings(BaseSettings):
         default="dev-local-insecure-token", alias="DEV_AUTH_TOKEN"
     )
     worker_concurrency: int = Field(default=2, alias="WORKER_CONCURRENCY")
+    runs_dir: str = Field(default="./runs", alias="RUNS_DIR")
 
 
 def get_settings() -> Settings:

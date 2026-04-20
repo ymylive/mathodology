@@ -5,6 +5,7 @@ import EventCard from "@/components/EventCard.vue";
 import AgentStreamCard from "@/components/AgentStreamCard.vue";
 import AgentOutputCard from "@/components/AgentOutputCard.vue";
 import CostMeter from "@/components/CostMeter.vue";
+import KernelActivityPanel from "@/components/KernelActivityPanel.vue";
 
 const store = useRunStore();
 const problemText = ref(
@@ -224,6 +225,9 @@ async function run() {
             :usage="store.usage[agent] ?? null"
             :active="activeAgents.has(agent)"
           />
+          <!-- Coder: live kernel activity between stream + structured output.
+               The panel hides itself when there are no cells. -->
+          <KernelActivityPanel v-if="agent === 'coder'" />
           <AgentOutputCard
             v-if="store.outputs[agent]"
             :agent="agent"

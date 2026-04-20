@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import AnalyzerOutputView from "@/components/AnalyzerOutputView.vue";
+import CoderOutputView from "@/components/CoderOutputView.vue";
 
 // Displays the structured `agent.output` payload for a single agent.
 // Collapsed by default so the stream card above stays the visual focus.
@@ -76,6 +77,7 @@ const durationLabel = computed(() => {
 });
 
 const isAnalyzer = computed(() => props.schemaName === "AnalyzerOutput");
+const isCoder = computed(() => props.schemaName === "CoderOutput");
 
 const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
 </script>
@@ -146,6 +148,7 @@ const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
       class="px-3 py-3 border-t border-sky-900/60"
     >
       <AnalyzerOutputView v-if="isAnalyzer" :output="output" />
+      <CoderOutputView v-else-if="isCoder" :output="output" />
       <pre
         v-else
         class="mono text-xs text-neutral-200 whitespace-pre-wrap break-words overflow-auto max-h-[50vh] bg-neutral-950/60 rounded border border-neutral-800 p-2"

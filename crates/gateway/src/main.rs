@@ -43,11 +43,23 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to bootstrap LLM provider registry")?;
     tracing::info!(path = %cfg.providers_path.display(), "LLM provider registry loaded");
 
+    // Ensure the run-artifacts directory exists (worker writes here, gateway
+    // reads). Then canonicalize so later path-traversal checks compare
+    // real paths and not symlink-ambiguous ones.
+    tokio::fs::create_dir_all(&cfg.runs_dir)
+        .await
+        .with_context(|| format!("failed to create RUNS_DIR at {}", cfg.runs_dir.display()))?;
+    let runs_dir_canonical = tokio::fs::canonicalize(&cfg.runs_dir)
+        .await
+        .with_context(|| format!("failed to canonicalize RUNS_DIR at {}", cfg.runs_dir.display()))?;
+    tracing::info!(path = %runs_dir_canonical.display(), "runs_dir ready");
+
     let state = AppState {
         redis,
         pg,
         config: cfg.clone(),
         llm,
+        runs_dir: Arc::new(runs_dir_canonical),
     };
 
     let addr: SocketAddr = format!("{}:{}", cfg.host, cfg.port)

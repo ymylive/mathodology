@@ -57,6 +57,57 @@ paths:
               schema: { $ref: "#/components/schemas/Run" }
         "404": { description: Not found }
 
+  /runs/{run_id}/figures/{path}:
+    get:
+      summary: Serve a figure file written by the worker
+      description: |
+        Returns the PNG / JPEG / SVG written at
+        `<RUNS_DIR>/<run_id>/figures/<path>`. Path traversal is rejected
+        (403). Only image extensions are served (415 for anything else).
+        Response has `Cache-Control: private, max-age=3600`.
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: path
+          required: true
+          description: Relative path under the run's `figures/` directory.
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/svg+xml: { schema: { type: string } }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden (path traversal) }
+        "404": { description: Not found }
+        "413": { description: Payload too large (>16 MiB) }
+        "415": { description: Unsupported media type }
+
+  /runs/{run_id}/notebook:
+    get:
+      summary: Download the executed Jupyter notebook for a run
+      description: |
+        Returns `<RUNS_DIR>/<run_id>/notebook.ipynb` as an attachment with
+        `Content-Type: application/x-ipynb+json`.
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/x-ipynb+json:
+              schema: { type: string, format: binary }
+        "401": { description: Unauthorized }
+        "404": { description: Not found }
+
   /llm/chat/completions:
     post:
       summary: OpenAI-compatible chat completions (passthrough to configured providers)

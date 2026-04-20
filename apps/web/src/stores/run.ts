@@ -36,6 +36,18 @@ export interface AgentOutput {
   ts: string;
 }
 
+// A single Jupyter cell's live execution state. Built up incrementally from
+// `kernel.stdout` / `kernel.figure` events and framed by
+// `log:"executing cell N"` boundaries. The final structured result lives in
+// the CoderOutput `agent.output`; this record is the live view.
+export interface KernelCellState {
+  stdout: string;
+  stderr: string;
+  figures: { path: string; format?: string }[];
+  startTs?: string;
+  doneTs?: string;
+}
+
 interface State {
   runId: string | null;
   status: RunStatus;
@@ -46,13 +58,24 @@ interface State {
   tokens: Record<string, AgentStream>;
   usage: Record<string, AgentUsage>;
   outputs: Record<string, AgentOutput>;
+  kernelCells: Record<number, KernelCellState>;
+  notebookPath: string | null;
 }
 
 // Events we never push into the feed. `token` is chatty and folded into the
 // stream buffer; `agent.output` is captured into `outputs` and rendered in a
 // dedicated card, so it stays out of the feed to avoid duplicating the
-// `stage.done` that follows.
-const FEED_HIDDEN_KINDS = new Set(["token", "agent.output"]);
+// `stage.done` that follows. `kernel.stdout` can produce many frames per
+// cell and has its own live panel — keep it out of the ordered feed.
+const FEED_HIDDEN_KINDS = new Set([
+  "token",
+  "agent.output",
+  "kernel.stdout",
+]);
+
+// `log` payloads that match this exact pattern are treated as cell-boundary
+// markers. Frame is `{ level:"info", message:"executing cell 0" }`.
+const EXECUTING_CELL_RE = /^executing cell (\d+)$/;
 
 // Agent key used for events with a null `agent` field. Keeps the record keys
 // stringly-typed so Vue can reactively track them.
@@ -64,6 +87,10 @@ function emptyStream(): AgentStream {
 
 function emptyUsage(): AgentUsage {
   return { promptTokens: 0, completionTokens: 0, costRmb: 0 };
+}
+
+function emptyCell(): KernelCellState {
+  return { stdout: "", stderr: "", figures: [] };
 }
 
 // The WebSocket client is kept outside reactive state so Vue doesn't try to
@@ -81,6 +108,8 @@ export const useRunStore = defineStore("run", {
     tokens: {},
     usage: {},
     outputs: {},
+    kernelCells: {},
+    notebookPath: null,
   }),
 
   getters: {
@@ -105,6 +134,8 @@ export const useRunStore = defineStore("run", {
       this.tokens = {};
       this.usage = {};
       this.outputs = {};
+      this.kernelCells = {};
+      this.notebookPath = null;
     },
 
     async startRun(problemText: string) {
@@ -169,6 +200,46 @@ export const useRunStore = defineStore("run", {
         return;
       }
 
+      // Kernel stdout/stderr: incremental text per cell. Folded into
+      // kernelCells; kept out of the ordered feed (too chatty for the feed).
+      if (ev.kind === "kernel.stdout") {
+        const p = ev.payload as {
+          text?: unknown;
+          name?: unknown;
+          cell_index?: unknown;
+        };
+        const text = typeof p.text === "string" ? p.text : "";
+        const name = p.name === "stderr" ? "stderr" : "stdout";
+        const ci = typeof p.cell_index === "number" ? p.cell_index : 0;
+        const cell = this.kernelCells[ci] ?? emptyCell();
+        if (name === "stderr") {
+          cell.stderr = cell.stderr + text;
+        } else {
+          cell.stdout = cell.stdout + text;
+        }
+        this.kernelCells[ci] = cell;
+        return;
+      }
+
+      // Kernel figure: push into cell's figures list. This event is rare
+      // (1-3 per run) so it stays in the feed as a visible milestone.
+      if (ev.kind === "kernel.figure") {
+        const p = ev.payload as {
+          path?: unknown;
+          format?: unknown;
+          cell_index?: unknown;
+        };
+        const path = typeof p.path === "string" ? p.path : "";
+        const format = typeof p.format === "string" ? p.format : undefined;
+        const ci = typeof p.cell_index === "number" ? p.cell_index : 0;
+        if (path) {
+          const cell = this.kernelCells[ci] ?? emptyCell();
+          cell.figures = [...cell.figures, { path, format }];
+          this.kernelCells[ci] = cell;
+        }
+        // Fall through: also append to the feed.
+      }
+
       // `agent.output` carries the structured Pydantic result. We stash it
       // per-agent and keep it out of the feed — the immediately-following
       // `stage.done` already marks the boundary there.
@@ -192,11 +263,45 @@ export const useRunStore = defineStore("run", {
           durationMs,
           ts: ev.ts,
         };
+        // CoderOutput may carry notebook_path; capture it so the download
+        // button lights up even before the terminal `done` arrives.
+        if (schemaName === "CoderOutput") {
+          const nb = output["notebook_path"];
+          if (typeof nb === "string" && nb.length > 0) {
+            this.notebookPath = nb;
+          }
+        }
         return;
       }
 
       // Everything else goes into the ordered event feed.
       this.events.push(ev);
+
+      if (ev.kind === "log") {
+        // `executing cell N` is emitted by the worker as a cell boundary.
+        // We stamp the cell's startTs; the previous cell (if any) gets its
+        // doneTs so the panel can show durations.
+        const p = ev.payload as { message?: unknown };
+        const msg = typeof p.message === "string" ? p.message : "";
+        const m = EXECUTING_CELL_RE.exec(msg);
+        if (m) {
+          const ci = Number.parseInt(m[1], 10);
+          if (!Number.isNaN(ci)) {
+            // Close out whichever cell currently has startTs but no doneTs.
+            for (const k of Object.keys(this.kernelCells)) {
+              const idx = Number.parseInt(k, 10);
+              if (idx === ci) continue;
+              const existing = this.kernelCells[idx];
+              if (existing && existing.startTs && !existing.doneTs) {
+                this.kernelCells[idx] = { ...existing, doneTs: ev.ts };
+              }
+            }
+            const cell = this.kernelCells[ci] ?? emptyCell();
+            this.kernelCells[ci] = { ...cell, startTs: cell.startTs ?? ev.ts };
+          }
+        }
+        return;
+      }
 
       if (ev.kind === "stage.start") {
         // New stage for this agent: clear the streaming buffer so the UI
@@ -246,8 +351,24 @@ export const useRunStore = defineStore("run", {
       }
 
       if (ev.kind === "done") {
-        const p = ev.payload as { status?: string; cost_rmb?: number };
+        const p = ev.payload as {
+          status?: string;
+          cost_rmb?: number;
+          notebook_path?: string;
+        };
         if (typeof p.cost_rmb === "number") this.costRmb = p.cost_rmb;
+        if (typeof p.notebook_path === "string" && p.notebook_path.length > 0) {
+          this.notebookPath = p.notebook_path;
+        }
+        // Close any still-open cell on run termination so the panel stops
+        // showing the spinner.
+        for (const k of Object.keys(this.kernelCells)) {
+          const idx = Number.parseInt(k, 10);
+          const existing = this.kernelCells[idx];
+          if (existing && existing.startTs && !existing.doneTs) {
+            this.kernelCells[idx] = { ...existing, doneTs: ev.ts };
+          }
+        }
         this.status = p.status === "failed" ? "failed" : "done";
         return;
       }

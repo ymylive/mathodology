@@ -32,16 +32,19 @@ pub enum ProviderError {
 
 impl ProviderError {
     /// Router consults this to decide whether to attempt the next provider in
-    /// the fallback chain. 429 / 5xx / network / timeout are retryable; other
-    /// 4xx (client error) is terminal.
+    /// the fallback chain.
+    ///
+    /// Retryable HTTP codes: 408 (request timeout), 425 (too early),
+    /// 429 (rate limit), 500, 502, 503, 504. Plus network errors and
+    /// timeouts. Every other status — and config/parse errors — is terminal.
     pub fn is_retryable(&self) -> bool {
         match self {
             ProviderError::Network(_) | ProviderError::Timeout => true,
-            ProviderError::HttpStatus(s, _) => {
-                s.as_u16() == 429 || s.as_u16() >= 500
-            }
+            ProviderError::HttpStatus(s, _) => matches!(
+                s.as_u16(),
+                408 | 425 | 429 | 500 | 502 | 503 | 504
+            ),
             ProviderError::BadConfig(_) | ProviderError::Parse(_) => false,
-            // HttpStatus 4xx (non-429) and similar treated as terminal above.
         }
     }
 }

@@ -12,6 +12,7 @@ use dashmap::DashMap;
 use reqwest::Client;
 use serde::Deserialize;
 
+use crate::llm::providers::anthropic::AnthropicAdapter;
 use crate::llm::providers::openai_compat::OpenAICompatAdapter;
 use crate::llm::providers::ProviderAdapter;
 
@@ -108,11 +109,7 @@ impl ProviderRegistry {
 
             match p.kind.as_str() {
                 "openai_compat" => {
-                    let api_key = if p.api_key_env.is_empty() {
-                        String::new()
-                    } else {
-                        std::env::var(&p.api_key_env).unwrap_or_default()
-                    };
+                    let api_key = resolve_api_key(&p.api_key_env, &p.name);
                     let adapter = OpenAICompatAdapter::new(
                         p.name.clone(),
                         p.base_url.clone(),
@@ -123,10 +120,15 @@ impl ProviderRegistry {
                     providers.push(Arc::new(adapter));
                 }
                 "anthropic" => {
-                    tracing::warn!(
-                        provider = %p.name,
-                        "anthropic provider skipped (adapter lands in M8)"
+                    let api_key = resolve_api_key(&p.api_key_env, &p.name);
+                    let adapter = AnthropicAdapter::new(
+                        p.name.clone(),
+                        p.base_url.clone(),
+                        api_key,
+                        p.models.clone(),
+                        http.clone(),
                     );
+                    providers.push(Arc::new(adapter));
                 }
                 other => {
                     tracing::warn!(
@@ -145,4 +147,23 @@ impl ProviderRegistry {
             prices,
         })
     }
+}
+
+/// Read the API key from `api_key_env` and WARN if the env var is set but
+/// resolves to empty (or unset). Returning `""` is valid — it tells the
+/// adapter to omit the auth header, which is what the Ollama-local case
+/// relies on. The warn is purely for operator observability.
+fn resolve_api_key(env_name: &str, provider_name: &str) -> String {
+    if env_name.is_empty() {
+        return String::new();
+    }
+    let val = std::env::var(env_name).unwrap_or_default();
+    if val.is_empty() {
+        tracing::warn!(
+            provider = %provider_name,
+            env = %env_name,
+            "api_key_env resolved to empty; provider will send requests without auth"
+        );
+    }
+    val
 }

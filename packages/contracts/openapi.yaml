@@ -213,7 +213,7 @@ components:
           enum: [analyzer, modeler, coder, writer, critic, searcher, null]
         kind:
           type: string
-          enum: [stage.start, stage.done, log, token, cost, kernel.stdout, kernel.figure, error, done]
+          enum: [stage.start, stage.done, log, token, cost, agent.output, kernel.stdout, kernel.figure, error, done]
         seq: { type: integer, minimum: 0 }
         ts: { type: string, format: date-time }
         payload: { type: object, additionalProperties: true }

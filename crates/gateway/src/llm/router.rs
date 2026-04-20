@@ -1,4 +1,13 @@
 //! Model → adapter resolver + fallback chain.
+//!
+//! Retry semantics (see also `ProviderError::is_retryable`):
+//! - We try each model in the chain at most once.
+//! - Fallback fires only when the current attempt returns a retryable error
+//!   *before* streaming starts. Network/5xx/408/425/429 qualify; any other
+//!   4xx or a config/parse error is terminal.
+//! - Once a stream has yielded its first chunk, we do NOT retry — mid-stream
+//!   network failures surface to the client as an `error` SSE event, which
+//!   matches OpenAI's behavior and avoids double-billing or token re-ordering.
 
 use std::sync::Arc;
 
@@ -55,22 +64,17 @@ impl Router {
         let chain = self.build_chain(&primary);
 
         let mut last_err: Option<ProviderError> = None;
-        for model in chain {
-            let Some(adapter) = self.resolve(&model) else {
+        for (idx, model) in chain.iter().enumerate() {
+            let Some(adapter) = self.resolve(model) else {
                 tracing::warn!(model = %model, "no adapter supports model; skipping");
                 continue;
             };
-            let mut req = req.clone();
-            req.model = model.clone();
-            match adapter.complete(req).await {
-                Ok(resp) => return Ok((model, resp)),
+            let mut attempt = req.clone();
+            attempt.model = model.clone();
+            match adapter.complete(attempt).await {
+                Ok(resp) => return Ok((model.clone(), resp)),
                 Err(err) if err.is_retryable() => {
-                    tracing::warn!(
-                        provider = adapter.name(),
-                        model = %model,
-                        error = %err,
-                        "provider retryable error; trying next fallback"
-                    );
+                    log_fallback(&err, adapter.name(), model, chain.get(idx + 1));
                     last_err = Some(err);
                     continue;
                 }
@@ -83,7 +87,7 @@ impl Router {
     }
 
     /// Streaming counterpart: tries primary, then fallback models. Fallback
-    /// only applies BEFORE any byte has been yielded; once a stream starts,
+    /// only applies BEFORE any chunk has been yielded; once a stream starts,
     /// the caller owns teardown and retries are not attempted.
     pub async fn stream_with_fallback(
         &self,
@@ -96,22 +100,17 @@ impl Router {
         let chain = self.build_chain(&primary);
 
         let mut last_err: Option<ProviderError> = None;
-        for model in chain {
-            let Some(adapter) = self.resolve(&model) else {
+        for (idx, model) in chain.iter().enumerate() {
+            let Some(adapter) = self.resolve(model) else {
                 tracing::warn!(model = %model, "no adapter supports model; skipping");
                 continue;
             };
-            let mut req = req.clone();
-            req.model = model.clone();
-            match adapter.stream(req).await {
-                Ok(s) => return Ok((model, s)),
+            let mut attempt = req.clone();
+            attempt.model = model.clone();
+            match adapter.stream(attempt).await {
+                Ok(s) => return Ok((model.clone(), s)),
                 Err(err) if err.is_retryable() => {
-                    tracing::warn!(
-                        provider = adapter.name(),
-                        model = %model,
-                        error = %err,
-                        "provider retryable stream error; trying next fallback"
-                    );
+                    log_fallback(&err, adapter.name(), model, chain.get(idx + 1));
                     last_err = Some(err);
                     continue;
                 }
@@ -136,4 +135,29 @@ impl Router {
         }
         chain
     }
+}
+
+/// Shared fallback-transition log line. Emitted whenever a retryable error
+/// causes us to move on to the next model in the chain.
+fn log_fallback(
+    err: &ProviderError,
+    provider: &str,
+    attempted_model: &str,
+    next_model: Option<&String>,
+) {
+    let status = match err {
+        ProviderError::HttpStatus(s, _) => s.as_u16().to_string(),
+        ProviderError::Timeout => "timeout".to_string(),
+        ProviderError::Network(_) => "network".to_string(),
+        _ => "unknown".to_string(),
+    };
+    let next = next_model.map(String::as_str).unwrap_or("<none>");
+    tracing::warn!(
+        attempted_provider = provider,
+        attempted_model = attempted_model,
+        status = %status,
+        next_model = %next,
+        error = %err,
+        "router falling back to next model"
+    );
 }

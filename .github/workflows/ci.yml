@@ -1,0 +1,179 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust (fmt + clippy + test)
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://mm:mm@127.0.0.1:5432/mm
+      REDIS_URL: redis://127.0.0.1:6379/0
+      DEV_AUTH_TOKEN: dev-ci-token
+      RUST_LOG: warn
+      CARGO_TERM_COLOR: always
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mm
+          POSTGRES_PASSWORD: mm
+          POSTGRES_DB: mm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mm -d mm"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache sqlx-cli binary
+        id: cache-sqlx
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/sqlx
+          key: sqlx-cli-${{ runner.os }}-v0.8-postgres-rustls
+
+      - name: Install sqlx-cli
+        if: steps.cache-sqlx.outputs.cache-hit != 'true'
+        run: cargo install sqlx-cli --no-default-features --features postgres,rustls --locked
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: Run sqlx migrations
+        working-directory: crates/gateway
+        run: sqlx migrate run
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+  python:
+    name: python (ruff + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: uv sync (frozen)
+        run: uv sync --frozen
+
+      - name: ruff check
+        run: uv tool run ruff check .
+
+      - name: pytest
+        run: uv run pytest apps/agent-worker -q
+
+  web:
+    name: web (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: vue-tsc typecheck
+        run: pnpm --filter web typecheck
+
+      - name: vite build
+        run: pnpm --filter web build
+
+  contracts-drift:
+    name: contracts-drift (non-blocking)
+    runs-on: ubuntu-latest
+    # Non-blocking: datamodel-code-generator is installed ad-hoc (not in uv.lock),
+    # so codegen could drift on transitive updates. See README "Known limitations".
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: uv sync (frozen)
+        run: uv sync --frozen
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install datamodel-code-generator
+        run: uv tool install 'datamodel-code-generator[http]'
+
+      - name: Regenerate contracts
+        run: |
+          uv tool run datamodel-codegen \
+            --input packages/contracts/openapi.yaml \
+            --input-file-type openapi \
+            --output packages/py-contracts/src/mm_contracts/generated.py \
+            --output-model-type pydantic_v2.BaseModel \
+            --target-python-version 3.11
+          pnpm exec openapi-typescript packages/contracts/openapi.yaml -o packages/ts-contracts/src/generated.ts
+
+      - name: Fail if generated contracts drifted
+        run: git diff --exit-code packages/py-contracts packages/ts-contracts

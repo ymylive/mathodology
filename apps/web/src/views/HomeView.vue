@@ -7,6 +7,17 @@ import AgentOutputCard from "@/components/AgentOutputCard.vue";
 import CostMeter from "@/components/CostMeter.vue";
 import KernelActivityPanel from "@/components/KernelActivityPanel.vue";
 import PaperDraftView from "@/components/PaperDraftView.vue";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { ArrowDown, Play as PlayIcon, RotateCcw, Wifi, WifiOff } from "lucide-vue-next";
 
 const store = useRunStore();
 const problemText = ref(
@@ -27,7 +38,9 @@ const isReconnecting = computed(
     store.runId !== null,
 );
 
-const statusPillClass = computed(() => {
+// Status → shadcn Badge variant + extra tailwind classes for the semantic
+// color the default variants don't give us (running=sky, queued=amber, etc).
+const statusClass = computed(() => {
   switch (store.status) {
     case "running":
       return "bg-sky-950 text-sky-300 border-sky-900";
@@ -38,7 +51,7 @@ const statusPillClass = computed(() => {
     case "failed":
       return "bg-red-950 text-red-300 border-red-900";
     default:
-      return "bg-neutral-800 text-neutral-400 border-neutral-700";
+      return "bg-secondary text-muted-foreground border-border";
   }
 });
 
@@ -110,191 +123,217 @@ const writerPaper = computed(() => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-[1024px] px-4 sm:px-6 py-6 space-y-4">
-    <!-- Header: title, status, cost meter -->
-    <header class="flex items-center gap-3 flex-wrap">
-      <h1 class="text-base font-medium text-neutral-200 tracking-wide">
-        Mathodology
-      </h1>
-      <span
-        class="mono text-[11px] px-2 py-0.5 rounded border"
-        :class="statusPillClass"
+  <div class="min-h-full">
+    <!-- Sticky top bar: title + status/run pills on the left, ws + cost on
+         the right. Always present so the run controls stay reachable while
+         the feed scrolls. -->
+    <header
+      class="sticky top-0 z-20 border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70"
+    >
+      <div
+        class="mx-auto max-w-[1200px] px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap"
       >
-        {{ store.status }}
-      </span>
-      <span
-        v-if="isReconnecting"
-        class="mono text-[11px] px-2 py-0.5 rounded border border-amber-900 bg-amber-950 text-amber-300 inline-flex items-center gap-1"
-      >
-        <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-        reconnecting…
-      </span>
-      <span
-        v-if="store.runId"
-        class="mono text-xs text-neutral-500 truncate"
-        :title="store.runId"
-      >
-        run {{ store.runId.slice(0, 8) }}…
-      </span>
-      <span class="ml-auto">
-        <CostMeter :total-rmb="store.costRmb" />
-      </span>
+        <h1 class="text-base font-semibold text-foreground tracking-wide">
+          Mathodology
+        </h1>
+        <Separator orientation="vertical" class="h-5 mx-1" />
+        <Badge
+          variant="outline"
+          :class="['mono text-[11px] font-normal', statusClass]"
+        >
+          {{ store.status }}
+        </Badge>
+        <Badge
+          v-if="isReconnecting"
+          variant="outline"
+          class="mono text-[11px] font-normal gap-1 border-amber-900 bg-amber-950 text-amber-300"
+        >
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          reconnecting…
+        </Badge>
+        <Tooltip v-if="store.runId">
+          <TooltipTrigger as-child>
+            <span class="mono text-xs text-muted-foreground truncate cursor-default">
+              run {{ store.runId.slice(0, 8) }}…
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <span class="mono">{{ store.runId }}</span>
+          </TooltipContent>
+        </Tooltip>
+
+        <div class="ml-auto flex items-center gap-3">
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span
+                class="inline-flex items-center gap-1 mono text-xs"
+                :class="store.wsConnected ? 'text-emerald-400' : 'text-muted-foreground'"
+                :aria-label="store.wsConnected ? 'WebSocket connected' : 'WebSocket disconnected'"
+              >
+                <component
+                  :is="store.wsConnected ? Wifi : WifiOff"
+                  class="h-3.5 w-3.5"
+                  aria-hidden="true"
+                />
+                <span>ws</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {{ store.wsConnected ? "Live event stream connected" : "Not connected" }}
+            </TooltipContent>
+          </Tooltip>
+          <CostMeter :total-rmb="store.costRmb" />
+        </div>
+      </div>
     </header>
 
-    <!-- Input: sticks to top once events start flowing so the run controls
-         stay reachable while the feed scrolls. -->
-    <section
-      class="space-y-2 bg-neutral-950/80 backdrop-blur"
-      :class="feedEvents.length > 0 ? 'sticky top-0 z-10 py-2' : ''"
-    >
-      <label for="problem" class="text-sm text-neutral-400">
-        Problem input
-      </label>
-      <textarea
-        id="problem"
-        v-model="problemText"
-        rows="4"
-        class="w-full rounded-md bg-neutral-950 border border-neutral-800 text-neutral-100 p-3 mono text-sm focus:outline-none focus:ring-1 focus:ring-sky-700"
-        :disabled="isBusy"
-        placeholder="Paste a math/modelling problem here..."
-      />
-      <div class="flex items-center gap-3 flex-wrap">
-        <button
-          class="px-3 py-1.5 text-sm rounded-md bg-sky-700 hover:bg-sky-600 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed transition-colors"
-          :disabled="isBusy || !problemText.trim()"
-          @click="run"
-        >
-          {{ isBusy ? "Running..." : "Run" }}
-        </button>
-        <button
-          class="px-3 py-1.5 text-sm rounded-md bg-neutral-800 hover:bg-neutral-700 transition-colors"
-          @click="store.reset()"
-        >
-          Reset
-        </button>
+    <div class="mx-auto max-w-[1200px] px-4 sm:px-6 py-6 space-y-4">
+      <!-- Problem input section — always visible, not sticky. The top bar
+           handles the run/status affordance for the scrolling case. -->
+      <Card class="p-4 space-y-3">
+        <label for="problem" class="text-sm text-muted-foreground">
+          Problem input
+        </label>
+        <Textarea
+          id="problem"
+          v-model="problemText"
+          rows="4"
+          class="mono text-sm"
+          :disabled="isBusy"
+          placeholder="Paste a math/modelling problem here..."
+        />
+        <div class="flex items-center gap-2 flex-wrap">
+          <Button
+            :disabled="isBusy || !problemText.trim()"
+            @click="run"
+          >
+            <PlayIcon aria-hidden="true" />
+            {{ isBusy ? "Running..." : "Run" }}
+          </Button>
+          <Button
+            variant="secondary"
+            @click="store.reset()"
+          >
+            <RotateCcw aria-hidden="true" />
+            Reset
+          </Button>
+        </div>
 
-        <span
-          class="mono text-xs"
-          :class="store.wsConnected ? 'text-emerald-400' : 'text-neutral-500'"
-        >
-          ws {{ store.wsConnected ? "●" : "○" }}
-        </span>
+        <p v-if="store.error" class="text-sm text-red-400 mono">
+          {{ store.error }}
+        </p>
+      </Card>
+
+      <!-- Two-column grid: feed on the left, live streams on the right.
+           Collapses to a single column below 768px. -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- LEFT: filtered event feed -->
+        <Card class="overflow-hidden bg-card/60">
+          <header
+            class="px-3 py-2 border-b flex items-center justify-between"
+          >
+            <span class="text-sm text-foreground">Event feed</span>
+            <span class="mono text-xs text-muted-foreground tabular-nums">
+              {{ feedEvents.length }} event{{ feedEvents.length === 1 ? "" : "s" }}
+            </span>
+          </header>
+          <div v-if="feedEvents.length === 0" class="px-4 py-8 text-center">
+            <p class="text-sm text-muted-foreground">
+              No events yet. Click <span class="mono">Run</span> to start a stream.
+            </p>
+          </div>
+          <div v-else class="max-h-[60vh] overflow-y-auto">
+            <EventCard
+              v-for="ev in feedEvents"
+              :key="`${ev.run_id}-${ev.seq}`"
+              :event="ev"
+            />
+          </div>
+        </Card>
+
+        <!-- RIGHT: live per-agent streams -->
+        <section class="space-y-3">
+          <Card
+            v-if="streamAgents.length === 0"
+            class="bg-card/60 px-4 py-8 text-center"
+          >
+            <p class="text-sm text-muted-foreground">
+              Live agent streams will appear here once a run starts.
+            </p>
+          </Card>
+          <div
+            v-for="agent in streamAgents"
+            :key="agent"
+            class="space-y-2"
+          >
+            <AgentStreamCard
+              :agent="agent"
+              :text="store.tokens[agent]?.text ?? ''"
+              :model="store.tokens[agent]?.model ?? null"
+              :usage="store.usage[agent] ?? null"
+              :active="activeAgents.has(agent)"
+            />
+            <!-- Coder: live kernel activity between stream + structured output.
+                 The panel hides itself when there are no cells. -->
+            <KernelActivityPanel v-if="agent === 'coder'" />
+            <!-- Writer + PaperDraft: suppress the narrow AgentOutputCard
+                 and drop a hint pointing to the full-width card below. -->
+            <div
+              v-if="agent === 'writer' && writerPaper"
+              class="rounded-md border border-sky-900/60 bg-sky-950/20 px-3 py-2 text-xs text-sky-300 mono inline-flex items-center gap-1.5"
+            >
+              <ArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Paper rendered below</span>
+            </div>
+            <AgentOutputCard
+              v-else-if="store.outputs[agent]"
+              :agent="agent"
+              :schema-name="store.outputs[agent].schemaName"
+              :output="store.outputs[agent].output"
+              :duration-ms="store.outputs[agent].durationMs"
+            />
+          </div>
+        </section>
       </div>
 
-      <p v-if="store.error" class="text-sm text-red-400 mono">
-        {{ store.error }}
-      </p>
-    </section>
-
-    <!-- Two-column grid: feed on the left, live streams on the right.
-         Collapses to a single column below 768px. -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <!-- LEFT: filtered event feed -->
-      <section
-        class="rounded-md border border-neutral-800 bg-neutral-950/60 overflow-hidden"
+      <!-- Full-width paper card: Writer's PaperDraft is the main deliverable
+           so it breaks out of the 2-column flow and spans the full page. -->
+      <Card
+        v-if="writerPaper && store.runId"
+        class="overflow-hidden border-sky-900/60 bg-sky-950/10"
+        aria-label="Paper draft"
       >
         <header
-          class="px-3 py-2 border-b border-neutral-800 flex items-center justify-between"
+          class="px-4 py-2 border-b border-sky-900/60 flex items-center gap-2"
         >
-          <span class="text-sm text-neutral-300">Event feed</span>
-          <span class="mono text-xs text-neutral-500 tabular-nums">
-            {{ feedEvents.length }} event{{ feedEvents.length === 1 ? "" : "s" }}
-          </span>
-        </header>
-        <div v-if="feedEvents.length === 0" class="px-4 py-8 text-center">
-          <p class="text-sm text-neutral-500">
-            No events yet. Click <span class="mono">Run</span> to start a stream.
-          </p>
-        </div>
-        <div v-else class="max-h-[60vh] overflow-y-auto">
-          <EventCard
-            v-for="ev in feedEvents"
-            :key="`${ev.run_id}-${ev.seq}`"
-            :event="ev"
+          <span
+            class="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+            style="background-color: var(--color-agent-writer)"
+            aria-hidden="true"
           />
-        </div>
-      </section>
-
-      <!-- RIGHT: live per-agent streams -->
-      <section class="space-y-3">
-        <div
-          v-if="streamAgents.length === 0"
-          class="rounded-md border border-neutral-800 bg-neutral-950/60 px-4 py-8 text-center"
-        >
-          <p class="text-sm text-neutral-500">
-            Live agent streams will appear here once a run starts.
-          </p>
-        </div>
-        <div
-          v-for="agent in streamAgents"
-          :key="agent"
-          class="space-y-2"
-        >
-          <AgentStreamCard
-            :agent="agent"
-            :text="store.tokens[agent]?.text ?? ''"
-            :model="store.tokens[agent]?.model ?? null"
-            :usage="store.usage[agent] ?? null"
-            :active="activeAgents.has(agent)"
-          />
-          <!-- Coder: live kernel activity between stream + structured output.
-               The panel hides itself when there are no cells. -->
-          <KernelActivityPanel v-if="agent === 'coder'" />
-          <!-- Writer + PaperDraft: suppress the narrow AgentOutputCard
-               and drop a hint pointing to the full-width card below. -->
-          <div
-            v-if="agent === 'writer' && writerPaper"
-            class="rounded-md border border-sky-900/60 bg-sky-950/20 px-3 py-2 text-xs text-sky-300 mono inline-flex items-center gap-1.5"
+          <span class="text-sm text-foreground">Paper draft</span>
+          <Badge
+            variant="outline"
+            class="mono text-[11px] py-0 px-1.5 font-normal border-sky-900 bg-sky-950/60 text-sky-300"
           >
-            <span aria-hidden="true">↓</span>
-            <span>Paper rendered below</span>
-          </div>
-          <AgentOutputCard
-            v-else-if="store.outputs[agent]"
-            :agent="agent"
-            :schema-name="store.outputs[agent].schemaName"
-            :output="store.outputs[agent].output"
-            :duration-ms="store.outputs[agent].durationMs"
-          />
+            PaperDraft
+          </Badge>
+          <Badge
+            v-if="writerPaper.durationMs !== null"
+            variant="outline"
+            class="mono text-[11px] py-0 px-1.5 font-normal text-muted-foreground tabular-nums"
+          >
+            {{
+              writerPaper.durationMs < 1000
+                ? `${writerPaper.durationMs} ms`
+                : `${(writerPaper.durationMs / 1000).toFixed(1)} s`
+            }}
+          </Badge>
+        </header>
+        <div class="px-4 py-4">
+          <PaperDraftView :output="writerPaper.output" :run-id="store.runId" />
         </div>
-      </section>
+      </Card>
     </div>
-
-    <!-- Full-width paper card: Writer's PaperDraft is the main deliverable
-         so it breaks out of the 2-column flow and spans the full page. -->
-    <section
-      v-if="writerPaper && store.runId"
-      class="rounded-md border border-sky-900/60 bg-sky-950/10 overflow-hidden"
-      aria-label="Paper draft"
-    >
-      <header
-        class="px-4 py-2 border-b border-sky-900/60 flex items-center gap-2"
-      >
-        <span
-          class="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-          style="background-color: var(--color-agent-writer)"
-          aria-hidden="true"
-        />
-        <span class="text-sm text-neutral-200">Paper draft</span>
-        <span
-          class="mono text-[11px] px-1.5 py-0.5 rounded border border-sky-900 bg-sky-950/60 text-sky-300"
-        >
-          PaperDraft
-        </span>
-        <span
-          v-if="writerPaper.durationMs !== null"
-          class="mono text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-neutral-400 tabular-nums"
-        >
-          {{
-            writerPaper.durationMs < 1000
-              ? `${writerPaper.durationMs} ms`
-              : `${(writerPaper.durationMs / 1000).toFixed(1)} s`
-          }}
-        </span>
-      </header>
-      <div class="px-4 py-4">
-        <PaperDraftView :output="writerPaper.output" :run-id="store.runId" />
-      </div>
-    </section>
   </div>
 </template>

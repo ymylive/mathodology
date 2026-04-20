@@ -5,6 +5,9 @@ import CoderOutputView from "@/components/CoderOutputView.vue";
 import ModelSpecView from "@/components/ModelSpecView.vue";
 import PaperDraftView from "@/components/PaperDraftView.vue";
 import { useRunStore } from "@/stores/run";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ChevronDown, ChevronUp, Copy, Check } from "lucide-vue-next";
 
 const store = useRunStore();
 
@@ -90,8 +93,8 @@ const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
 </script>
 
 <template>
-  <section
-    class="rounded-md border border-sky-900/60 bg-sky-950/20 overflow-hidden"
+  <Card
+    class="overflow-hidden border-sky-900/60 bg-sky-950/20"
     :aria-label="`Structured output from ${agent}`"
   >
     <!-- Header is a real <button> for keyboard + screen-reader semantics. -->
@@ -107,25 +110,28 @@ const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
         :style="{ backgroundColor: agentColorVar }"
         aria-hidden="true"
       />
-      <span class="text-sm text-neutral-200 capitalize">{{ agent }}</span>
-      <span
-        class="mono text-[11px] px-1.5 py-0.5 rounded border border-sky-900 bg-sky-950/60 text-sky-300"
+      <span class="text-sm text-foreground capitalize">{{ agent }}</span>
+      <Badge
+        variant="outline"
+        class="mono text-[11px] py-0 px-1.5 font-normal border-sky-900 bg-sky-950/60 text-sky-300"
       >
         {{ schemaName }}
-      </span>
-      <span
+      </Badge>
+      <Badge
         v-if="durationLabel"
-        class="mono text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-neutral-400 tabular-nums"
+        variant="outline"
+        class="mono text-[11px] py-0 px-1.5 font-normal text-muted-foreground tabular-nums"
       >
         {{ durationLabel }}
-      </span>
+      </Badge>
 
       <span class="ml-auto inline-flex items-center gap-2">
         <span
           v-if="copied"
-          class="mono text-[11px] text-emerald-400"
+          class="mono text-[11px] text-emerald-400 inline-flex items-center gap-1"
           aria-live="polite"
         >
+          <Check class="h-3 w-3" aria-hidden="true" />
           copied
         </span>
         <!-- Inner <span> with role=button so we don't nest <button>s. -->
@@ -133,19 +139,19 @@ const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
           role="button"
           tabindex="0"
           aria-label="Copy JSON"
-          class="mono text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:border-neutral-600 cursor-pointer"
+          class="mono text-[11px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground cursor-pointer inline-flex items-center gap-1"
           @click="copyJson"
           @keydown.enter.stop.prevent="copyJson($event)"
           @keydown.space.stop.prevent="copyJson($event)"
         >
+          <Copy class="h-3 w-3" aria-hidden="true" />
           copy
         </span>
-        <span
-          class="mono text-[11px] text-neutral-500 w-3 text-center"
+        <component
+          :is="expanded ? ChevronUp : ChevronDown"
+          class="h-4 w-4 text-muted-foreground shrink-0"
           aria-hidden="true"
-        >
-          {{ expanded ? "▾" : "▸" }}
-        </span>
+        />
       </span>
     </button>
 
@@ -164,8 +170,8 @@ const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
       />
       <pre
         v-else
-        class="mono text-xs text-neutral-200 whitespace-pre-wrap break-words overflow-auto max-h-[50vh] bg-neutral-950/60 rounded border border-neutral-800 p-2"
+        class="mono text-xs text-foreground whitespace-pre-wrap break-words overflow-auto max-h-[50vh] bg-card/60 rounded border border-border p-2"
       >{{ prettyJson }}</pre>
     </div>
-  </section>
+  </Card>
 </template>

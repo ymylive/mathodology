@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRunStore } from "@/stores/run";
 import { figureUrl, notebookUrl } from "@/api/figures";
+import { renderPython } from "@/lib/shiki";
 
 // Schema-aware renderer for CoderOutput. The payload comes in as a loose
 // `Record<string, unknown>` from the store — narrow each field defensively
@@ -90,6 +91,30 @@ function formatDuration(ms: number | null): string | null {
 // Expanded-row tracking. Keyed by cell index. Default-closed; power users
 // can pop each open as needed. (KernelActivityPanel is the live view.)
 const expandedCells = ref<Record<number, boolean>>({});
+
+// Syntax-highlighted HTML for each cell's Python source, keyed by cell index.
+// Populated asynchronously: shiki is lazy-loaded on first use, so the raw
+// <pre> fallback is what the user sees for ~50–100ms after CoderOutput
+// arrives. Once the promise resolves we swap in the colored markup.
+const highlightedSources = ref<Record<number, string>>({});
+
+watch(
+  cells,
+  async (next) => {
+    const pending = next.filter(
+      (c) => c.source && !(c.index in highlightedSources.value),
+    );
+    if (pending.length === 0) return;
+    const results = await Promise.all(
+      pending.map(async (c) => ({ idx: c.index, html: await renderPython(c.source) })),
+    );
+    // Merge in one go so reactive updates coalesce.
+    const merged = { ...highlightedSources.value };
+    for (const { idx, html } of results) merged[idx] = html;
+    highlightedSources.value = merged;
+  },
+  { immediate: true },
+);
 
 function toggle(idx: number) {
   expandedCells.value = {
@@ -214,8 +239,16 @@ function onFigureError(ev: Event) {
               <div class="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">
                 Source
               </div>
+              <!-- Shiki-rendered once available; plain <pre> fallback while
+                   the highlighter lazy-loads (first cell only, ~50–100ms). -->
+              <div
+                v-if="highlightedSources[cell.index]"
+                class="shiki-source rounded border border-neutral-800 overflow-auto max-h-[40vh]"
+                v-html="highlightedSources[cell.index]"
+              ></div>
               <pre
-                class="mono text-xs text-neutral-200 whitespace-pre-wrap break-words bg-neutral-950/80 rounded border border-neutral-800 p-2 overflow-auto max-h-[40vh]"
+                v-else
+                class="mono text-xs text-neutral-300 whitespace-pre-wrap break-words bg-neutral-950/80 rounded border border-neutral-800 p-2 overflow-auto max-h-[40vh] opacity-70"
               >{{ cell.source }}</pre>
             </div>
 
@@ -292,3 +325,26 @@ function onFigureError(ev: Event) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/*
+ * Shiki injects per-token inline `color:` styles and a single `background`
+ * style on the <pre>. Everything here is just layout polish — colors come
+ * from the github-dark theme embedded by shiki.
+ */
+.shiki-source :deep(pre.shiki) {
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  overflow-x: auto;
+}
+
+.shiki-source :deep(pre.shiki code) {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+</style>

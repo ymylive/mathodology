@@ -3,11 +3,14 @@ import { computed } from "vue";
 import { Marked } from "marked";
 import type { Token, Tokens } from "marked";
 import { figureUrl } from "@/api/figures";
+import { substituteMath } from "@/lib/render-math";
 
 // Schema-aware renderer for PaperDraft. The run produces a full markdown
 // paper; we render it inline (per-section) so the user can read it without
-// downloading. LaTeX (`$...$`, `$$...$$`) is intentionally left as literal
-// text on M6 — KaTeX integration is deferred to M7.
+// downloading. LaTeX (`$...$`, `$$...$$`) is rendered with KaTeX as of M7:
+// marked produces HTML first, then `substituteMath` walks the HTML and
+// replaces dollar-delimited LaTeX with KaTeX output, skipping <code>/<pre>
+// so code samples containing `$` aren't mangled.
 //
 // Image rewrite: markdown like `![caption](figures/fig-0.png)` would produce
 // an `<img src="figures/fig-0.png">` which never resolves against the SPA's
@@ -75,6 +78,20 @@ const abstract = computed<string>(() => {
   return typeof v === "string" ? v : "";
 });
 
+// Abstract is plain text (not markdown), but authors may drop `$...$` inline
+// math into it. HTML-escape first so stray `<` / `&` aren't interpreted,
+// then run substituteMath — the escaped text has no tags, so the scanner
+// just applies math substitution globally.
+const abstractHtml = computed<string>(() => {
+  const raw = abstract.value;
+  if (!raw) return "";
+  const escaped = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return substituteMath(escaped);
+});
+
 const sections = computed<PaperSection[]>(() => {
   const raw = props.output["sections"];
   if (!Array.isArray(raw)) return [];
@@ -89,7 +106,8 @@ const sections = computed<PaperSection[]>(() => {
         typeof rec["body_markdown"] === "string" ? rec["body_markdown"] : "";
       if (!secTitle && !body) return null;
       // marked.parse with async:false returns a string synchronously.
-      const bodyHtml = md.parse(body, { async: false }) as string;
+      const rawHtml = md.parse(body, { async: false }) as string;
+      const bodyHtml = substituteMath(rawHtml);
       return { title: secTitle, bodyHtml };
     })
     .filter((x): x is PaperSection => x !== null);
@@ -137,9 +155,10 @@ function onFigureError(ev: Event) {
       <h4 class="text-xs uppercase tracking-wider text-neutral-500 mb-1">
         Abstract
       </h4>
-      <p class="italic text-neutral-200 leading-relaxed whitespace-pre-wrap">
-        {{ abstract }}
-      </p>
+      <p
+        class="italic text-neutral-200 leading-relaxed whitespace-pre-wrap markdown-body"
+        v-html="abstractHtml"
+      />
     </div>
 
     <!-- Sections -->

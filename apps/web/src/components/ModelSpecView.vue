@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { renderDisplay, renderInline } from "@/lib/render-math";
 
 // Schema-aware renderer for ModelSpec. Payload arrives from the store as a
 // loose `Record<string, unknown>` — narrow each field defensively so a
 // malformed event just hides the affected section rather than crashing the
-// card. LaTeX strings (`equations[].latex`) render as literal text on M6;
-// KaTeX / MathJax integration is deferred to M7.
+// card. M7: `equations[].latex` renders as KaTeX display math, and
+// `variables[].symbol` renders as KaTeX inline math (symbols are frequently
+// compound, e.g. `\lambda_i`).
 const props = defineProps<{
   output: Record<string, unknown>;
 }>();
@@ -136,9 +138,10 @@ const validation = computed<string>(() => {
               :key="i"
               class="border-t border-neutral-800 align-top"
             >
-              <td class="px-2 py-1 mono tabular-nums text-neutral-100">
-                {{ v.symbol }}
-              </td>
+              <td
+                class="px-2 py-1 text-neutral-100"
+                v-html="v.symbol ? renderInline(v.symbol) : '&mdash;'"
+              />
               <td class="px-2 py-1 text-neutral-200">{{ v.name }}</td>
               <td class="px-2 py-1 mono tabular-nums text-neutral-400">
                 <span v-if="v.unit">{{ v.unit }}</span>
@@ -164,9 +167,11 @@ const validation = computed<string>(() => {
           :key="i"
           class="rounded-md border border-neutral-800 bg-neutral-900/40 p-2 space-y-1"
         >
-          <pre
-            class="mono text-xs text-neutral-100 whitespace-pre-wrap break-words bg-neutral-950/80 rounded border border-neutral-800 p-2 overflow-auto"
-          >{{ eq.latex }}</pre>
+          <div
+            v-if="eq.latex"
+            class="text-neutral-100 bg-neutral-950/80 rounded border border-neutral-800 p-2 overflow-auto"
+            v-html="renderDisplay(eq.latex)"
+          />
           <p
             v-if="eq.description"
             class="text-sm text-neutral-300 leading-relaxed"

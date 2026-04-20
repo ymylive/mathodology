@@ -3,6 +3,17 @@ import { computed } from "vue";
 import type { AgentEvent } from "@mathodology/contracts";
 import { useRunStore } from "@/stores/run";
 import { figureUrl } from "@/api/figures";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleDollarSign,
+  Dot,
+  Image as ImageIcon,
+  Play,
+  Square,
+  Terminal,
+} from "lucide-vue-next";
 
 const props = defineProps<{ event: AgentEvent }>();
 
@@ -54,36 +65,39 @@ const kindClass = computed(() => {
     case "cost":
       return "bg-amber-950 text-amber-300 border-amber-900";
     case "log":
-      return "bg-neutral-800 text-neutral-300 border-neutral-700";
+      return "bg-secondary text-secondary-foreground border-border";
     case "kernel.stdout":
       return "bg-violet-950 text-violet-300 border-violet-900";
     case "kernel.figure":
       return "bg-fuchsia-950 text-fuchsia-300 border-fuchsia-900";
     default:
-      return "bg-neutral-800 text-neutral-400 border-neutral-700";
+      return "bg-secondary text-muted-foreground border-border";
   }
 });
 
+// Map kinds → lucide icon component. Using a component reference keeps
+// the template declarative and preserves tree-shaking (each import is its
+// own symbol).
 const kindIcon = computed(() => {
   switch (props.event.kind) {
     case "stage.start":
-      return "▶";
+      return Play;
     case "stage.done":
-      return "■";
+      return Square;
     case "log":
-      return "·";
+      return Dot;
     case "cost":
-      return "¥";
+      return CircleDollarSign;
     case "kernel.stdout":
-      return ">";
+      return Terminal;
     case "kernel.figure":
-      return "◆";
+      return ImageIcon;
     case "error":
-      return "!";
+      return AlertTriangle;
     case "done":
-      return "✓";
+      return CheckCircle2;
     default:
-      return "•";
+      return Dot;
   }
 });
 
@@ -166,35 +180,37 @@ const truncatedSummary = computed(() => {
       event.kind !== 'kernel.stdout'
     "
   >
-    <div class="flex items-start gap-3 px-3 py-2 border-b border-neutral-800">
-      <span class="mono text-xs text-neutral-500 shrink-0 w-[96px] tabular-nums">
+    <div class="flex items-start gap-3 px-3 py-2 border-b">
+      <span class="mono text-xs text-muted-foreground shrink-0 w-[96px] tabular-nums">
         {{ shortTs }}
       </span>
-      <span class="mono text-xs text-neutral-500 shrink-0 w-10 text-right tabular-nums">
+      <span class="mono text-xs text-muted-foreground shrink-0 w-10 text-right tabular-nums">
         #{{ event.seq }}
       </span>
-      <span
-        class="mono text-[11px] px-1.5 py-0.5 rounded border shrink-0 inline-flex items-center gap-1"
-        :class="kindClass"
+      <Badge
+        variant="outline"
+        :class="['mono text-[11px] py-0 px-1.5 font-normal gap-1 border', kindClass]"
       >
-        <span aria-hidden="true">{{ kindIcon }}</span>
+        <component :is="kindIcon" class="h-3 w-3" aria-hidden="true" />
         <span>{{ event.kind }}</span>
-      </span>
-      <span
+      </Badge>
+      <Badge
         v-if="event.agent"
-        class="mono text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-neutral-300 shrink-0"
+        variant="outline"
+        class="mono text-[11px] py-0 px-1.5 font-normal text-foreground"
       >
         {{ event.agent }}
-      </span>
+      </Badge>
 
       <!-- Cell-boundary log: dedicated pill instead of the raw text. -->
-      <span
+      <Badge
         v-if="executingCellIndex !== null"
-        class="mono text-[11px] px-1.5 py-0.5 rounded border border-violet-900 bg-violet-950/60 text-violet-300 inline-flex items-center gap-1"
+        variant="outline"
+        class="mono text-[11px] py-0 px-1.5 font-normal gap-1 border-violet-900 bg-violet-950/60 text-violet-300"
       >
-        <span aria-hidden="true">▶</span>
+        <Play class="h-3 w-3" aria-hidden="true" />
         <span>Cell {{ executingCellIndex }}</span>
-      </span>
+      </Badge>
 
       <!-- Figure: inline thumbnail next to its path. -->
       <template v-else-if="figureInfo">
@@ -202,18 +218,18 @@ const truncatedSummary = computed(() => {
           :href="figureInfo.src"
           target="_blank"
           rel="noopener"
-          class="block shrink-0 rounded border border-neutral-800 bg-neutral-950/60 overflow-hidden hover:border-fuchsia-700"
+          class="block shrink-0 rounded border border-border bg-card/60 overflow-hidden hover:border-fuchsia-700"
           :aria-label="`Open figure ${figureInfo.path}`"
         >
           <img
             :src="figureInfo.src"
             :alt="figureInfo.path"
-            class="block w-[60px] h-[45px] object-contain bg-neutral-950"
+            class="block w-[60px] h-[45px] object-contain bg-background"
             loading="lazy"
           />
         </a>
         <span
-          class="mono text-xs text-neutral-300 break-all min-w-0 truncate"
+          class="mono text-xs text-foreground break-all min-w-0 truncate"
           :title="figureInfo.path"
         >
           {{ figureInfo.path }}
@@ -222,7 +238,7 @@ const truncatedSummary = computed(() => {
 
       <span
         v-else
-        class="text-sm text-neutral-200 break-words min-w-0 whitespace-pre-wrap"
+        class="text-sm text-foreground break-words min-w-0 whitespace-pre-wrap"
       >
         {{ truncatedSummary }}
       </span>

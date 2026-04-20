@@ -2,6 +2,11 @@
 import { computed, ref } from "vue";
 import AnalyzerOutputView from "@/components/AnalyzerOutputView.vue";
 import CoderOutputView from "@/components/CoderOutputView.vue";
+import ModelSpecView from "@/components/ModelSpecView.vue";
+import PaperDraftView from "@/components/PaperDraftView.vue";
+import { useRunStore } from "@/stores/run";
+
+const store = useRunStore();
 
 // Displays the structured `agent.output` payload for a single agent.
 // Collapsed by default so the stream card above stays the visual focus.
@@ -78,6 +83,8 @@ const durationLabel = computed(() => {
 
 const isAnalyzer = computed(() => props.schemaName === "AnalyzerOutput");
 const isCoder = computed(() => props.schemaName === "CoderOutput");
+const isModelSpec = computed(() => props.schemaName === "ModelSpec");
+const isPaperDraft = computed(() => props.schemaName === "PaperDraft");
 
 const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
 </script>
@@ -149,6 +156,12 @@ const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
     >
       <AnalyzerOutputView v-if="isAnalyzer" :output="output" />
       <CoderOutputView v-else-if="isCoder" :output="output" />
+      <ModelSpecView v-else-if="isModelSpec" :output="output" />
+      <PaperDraftView
+        v-else-if="isPaperDraft"
+        :output="output"
+        :run-id="store.runId ?? ''"
+      />
       <pre
         v-else
         class="mono text-xs text-neutral-200 whitespace-pre-wrap break-words overflow-auto max-h-[50vh] bg-neutral-950/60 rounded border border-neutral-800 p-2"

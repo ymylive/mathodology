@@ -16,7 +16,13 @@ import time
 from typing import Any
 
 import orjson
-from mm_contracts import AnalyzerOutput, CellExecution, CoderOutput, ProblemInput
+from mm_contracts import (
+    AnalyzerOutput,
+    CellExecution,
+    CoderOutput,
+    ModelSpec,
+    ProblemInput,
+)
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent_worker.agents.base import AgentError, AgentParseError
@@ -58,7 +64,10 @@ class CoderAgent:
         self.prompt = load_prompt(self.AGENT_NAME, prompt_version)
 
     async def run(
-        self, problem: ProblemInput, analysis: AnalyzerOutput
+        self,
+        problem: ProblemInput,
+        analysis: AnalyzerOutput,
+        spec: ModelSpec,
     ) -> CoderOutput:
         """Execute the agent loop end-to-end; always emits stage lifecycle events."""
         t0 = time.monotonic()
@@ -76,6 +85,9 @@ class CoderAgent:
                     problem_text=problem.problem_text,
                     analysis_json=json.dumps(
                         analysis.model_dump(mode="json"), ensure_ascii=False, indent=2
+                    ),
+                    spec_json=json.dumps(
+                        spec.model_dump(mode="json"), ensure_ascii=False, indent=2
                     ),
                 ),
             },

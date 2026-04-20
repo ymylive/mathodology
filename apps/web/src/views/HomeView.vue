@@ -6,6 +6,7 @@ import AgentStreamCard from "@/components/AgentStreamCard.vue";
 import AgentOutputCard from "@/components/AgentOutputCard.vue";
 import CostMeter from "@/components/CostMeter.vue";
 import KernelActivityPanel from "@/components/KernelActivityPanel.vue";
+import PaperDraftView from "@/components/PaperDraftView.vue";
 
 const store = useRunStore();
 const problemText = ref(
@@ -95,6 +96,17 @@ async function run() {
   if (!text || isBusy.value) return;
   await store.startRun(text);
 }
+
+// Writer's PaperDraft is the biggest artifact of a run — we pull it out of
+// the agent-column flow and give it a full-width card below. The column
+// still shows the stream + a tiny "see paper below" hint so users don't
+// miss the transition.
+const writerPaper = computed(() => {
+  const writer = store.outputs["writer"];
+  if (!writer) return null;
+  if (writer.schemaName !== "PaperDraft") return null;
+  return writer;
+});
 </script>
 
 <template>
@@ -228,8 +240,17 @@ async function run() {
           <!-- Coder: live kernel activity between stream + structured output.
                The panel hides itself when there are no cells. -->
           <KernelActivityPanel v-if="agent === 'coder'" />
+          <!-- Writer + PaperDraft: suppress the narrow AgentOutputCard
+               and drop a hint pointing to the full-width card below. -->
+          <div
+            v-if="agent === 'writer' && writerPaper"
+            class="rounded-md border border-sky-900/60 bg-sky-950/20 px-3 py-2 text-xs text-sky-300 mono inline-flex items-center gap-1.5"
+          >
+            <span aria-hidden="true">↓</span>
+            <span>Paper rendered below</span>
+          </div>
           <AgentOutputCard
-            v-if="store.outputs[agent]"
+            v-else-if="store.outputs[agent]"
             :agent="agent"
             :schema-name="store.outputs[agent].schemaName"
             :output="store.outputs[agent].output"
@@ -238,5 +259,42 @@ async function run() {
         </div>
       </section>
     </div>
+
+    <!-- Full-width paper card: Writer's PaperDraft is the main deliverable
+         so it breaks out of the 2-column flow and spans the full page. -->
+    <section
+      v-if="writerPaper && store.runId"
+      class="rounded-md border border-sky-900/60 bg-sky-950/10 overflow-hidden"
+      aria-label="Paper draft"
+    >
+      <header
+        class="px-4 py-2 border-b border-sky-900/60 flex items-center gap-2"
+      >
+        <span
+          class="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+          style="background-color: var(--color-agent-writer)"
+          aria-hidden="true"
+        />
+        <span class="text-sm text-neutral-200">Paper draft</span>
+        <span
+          class="mono text-[11px] px-1.5 py-0.5 rounded border border-sky-900 bg-sky-950/60 text-sky-300"
+        >
+          PaperDraft
+        </span>
+        <span
+          v-if="writerPaper.durationMs !== null"
+          class="mono text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-neutral-400 tabular-nums"
+        >
+          {{
+            writerPaper.durationMs < 1000
+              ? `${writerPaper.durationMs} ms`
+              : `${(writerPaper.durationMs / 1000).toFixed(1)} s`
+          }}
+        </span>
+      </header>
+      <div class="px-4 py-4">
+        <PaperDraftView :output="writerPaper.output" :run-id="store.runId" />
+      </div>
+    </section>
   </div>
 </template>

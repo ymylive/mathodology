@@ -8,11 +8,14 @@ from mm_contracts.agent_io import (
     CellExecution,
     CoderOutput,
     DataRequirement,
+    Equation,
     ModelSpec,
     PaperDraft,
+    PaperSection,
     ProblemInput,
     RunResult,
     TokenUsage,
+    Variable,
 )
 
 __all__ = [
@@ -23,9 +26,12 @@ __all__ = [
     "CellExecution",
     "CoderOutput",
     "DataRequirement",
+    "Equation",
     "ModelSpec",
     "PaperDraft",
+    "PaperSection",
     "ProblemInput",
     "RunResult",
     "TokenUsage",
+    "Variable",
 ]

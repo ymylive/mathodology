@@ -34,8 +34,8 @@ Rules:
 
 [user_template]
 text = """
-You are solving this problem. First, read the analysis that the Analyzer
-agent produced, then write your first code cell.
+You are solving this problem. Read the Analyzer's scoped plan and the
+Modeler's concrete spec, then implement the approach step by step.
 
 Problem statement:
 {{ problem_text }}
@@ -43,8 +43,12 @@ Problem statement:
 Analyzer output (JSON):
 {{ analysis_json }}
 
+Modeler spec (JSON):
+{{ spec_json }}
+
 Respond with a JSON object: {"reasoning": "...", "code": "...", "done": false, "summary": null}.
-Start by loading/simulating the data you need and computing a first result.
+Follow the Modeler's chosen_approach and algorithm_outline. Start by
+loading/simulating the data you need and computing a first result.
 """
 
 [response_schema]

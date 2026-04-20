@@ -14,7 +14,12 @@ from uuid import uuid4
 import pytest
 from agent_worker.agents import CoderAgent
 from agent_worker.kernel import KernelSession
-from mm_contracts import AnalyzerOutput, ApproachSketch, ProblemInput
+from mm_contracts import (
+    AnalyzerOutput,
+    ApproachSketch,
+    ModelSpec,
+    ProblemInput,
+)
 
 
 class _FakeEmitter:
@@ -60,8 +65,21 @@ def analysis() -> AnalyzerOutput:
     )
 
 
+@pytest.fixture
+def spec() -> ModelSpec:
+    return ModelSpec(
+        chosen_approach="direct arithmetic",
+        rationale="trivial problem",
+        algorithm_outline=["compute 1+2", "print result"],
+        validation_strategy="eyeball",
+    )
+
+
 async def test_coder_agent_runs_single_turn(
-    tmp_path: Path, problem: ProblemInput, analysis: AnalyzerOutput
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
 ) -> None:
     directive_json = (
         '{"reasoning":"just compute","code":"print(1+2)",'
@@ -72,7 +90,7 @@ async def test_coder_agent_runs_single_turn(
     kernel = KernelSession(uuid4(), tmp_path)
 
     agent = CoderAgent(gateway, emitter, kernel)  # type: ignore[arg-type]
-    output = await agent.run(problem, analysis)
+    output = await agent.run(problem, analysis, spec)
 
     assert len(output.cells) == 1
     assert output.cells[0].index == 0
@@ -88,7 +106,10 @@ async def test_coder_agent_runs_single_turn(
 
 
 async def test_coder_agent_emits_kernel_stdout(
-    tmp_path: Path, problem: ProblemInput, analysis: AnalyzerOutput
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
 ) -> None:
     directive_json = (
         '{"reasoning":"print","code":"print(\\"hello from coder\\")",'
@@ -99,7 +120,7 @@ async def test_coder_agent_emits_kernel_stdout(
     kernel = KernelSession(uuid4(), tmp_path)
 
     agent = CoderAgent(gateway, emitter, kernel)  # type: ignore[arg-type]
-    await agent.run(problem, analysis)
+    await agent.run(problem, analysis, spec)
 
     stdout_events = [e for e in emitter.events if e[0] == "kernel.stdout"]
     assert stdout_events, "expected at least one kernel.stdout event"
@@ -108,7 +129,10 @@ async def test_coder_agent_emits_kernel_stdout(
 
 
 async def test_coder_agent_retries_on_parse_error(
-    tmp_path: Path, problem: ProblemInput, analysis: AnalyzerOutput
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
 ) -> None:
     # First response is unparseable; agent does NOT auto-retry because the
     # fake gateway is constructed with a single chunk set. So we drive the
@@ -133,7 +157,7 @@ async def test_coder_agent_retries_on_parse_error(
     kernel = KernelSession(uuid4(), tmp_path)
 
     agent = CoderAgent(gateway, emitter, kernel)  # type: ignore[arg-type]
-    output = await agent.run(problem, analysis)
+    output = await agent.run(problem, analysis, spec)
 
     assert gateway.calls == 2
     assert output.final_summary == "retried"

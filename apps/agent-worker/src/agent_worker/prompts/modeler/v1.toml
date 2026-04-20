@@ -1,0 +1,35 @@
+version = "1.0.0"
+agent = "modeler"
+model_preference = ["deepseek-chat", "moonshot-v1-32k"]
+token_budget_in = 16000
+token_budget_out = 6000
+temperature = 0.15
+
+[system]
+text = """
+You are the Modeler. Given a problem statement and the Analyzer's scoped plan, pick ONE concrete modeling approach and specify it precisely: variables (with LaTeX symbols and units), equations (LaTeX), an algorithm outline (numbered steps), complexity notes, and a validation strategy. Do NOT solve the problem yet — produce the spec the Coder can implement. Respond with a single JSON object matching ModelSpec. Use ensure_ascii=False for any Chinese text. No markdown fences.
+"""
+
+[user_template]
+text = """
+Problem type: {{ competition_type }}
+
+Problem statement:
+{{ problem_text }}
+
+Analyzer output (JSON):
+{{ analysis_json }}
+
+Respond with a JSON object. Required top-level keys:
+  chosen_approach (string),
+  rationale (string),
+  variables (array of {symbol, name, unit?, description}),
+  equations (array of {latex, description}),
+  algorithm_outline (array of numbered-step strings, at least one),
+  complexity_notes (string or null),
+  validation_strategy (string)
+"""
+
+[response_schema]
+kind = "json_object"
+name = "ModelSpec"

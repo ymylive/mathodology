@@ -25,3 +25,11 @@ export function figureUrl(runId: string, relPath: string): string {
 export function notebookUrl(runId: string): string {
   return `${BASE}/runs/${runId}/notebook?token=${encodeURIComponent(TOKEN)}`;
 }
+
+// Paper markdown download URL. The endpoint is not yet implemented (planned
+// for M7+) — this helper exists so the UI can start linking to it without a
+// follow-up frontend change. Until the endpoint lands the URL will 404, so we
+// avoid rendering a button that targets it for now (see PaperDraftView).
+export function paperUrl(runId: string): string {
+  return `${BASE}/runs/${runId}/paper?token=${encodeURIComponent(TOKEN)}`;
+}

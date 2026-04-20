@@ -136,10 +136,38 @@ class AnalyzerOutput(BaseModel):
     proposed_approaches: list[ApproachSketch] = Field(min_length=1, max_length=3)
 
 
-class ModelSpec(BaseModel):
-    """Modeler agent output. Stub for M1."""
+class Variable(BaseModel):
+    """One variable in the Modeler's spec, with LaTeX symbol and units."""
 
-    name: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str  # e.g. "\\lambda_i"
+    name: str  # human-readable
+    unit: str | None = None
+    description: str
+
+
+class Equation(BaseModel):
+    """One equation in the Modeler's spec, written in LaTeX."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    latex: str  # LaTeX without surrounding $$; e.g. "\\lambda_i = f(t)"
+    description: str  # short prose
+
+
+class ModelSpec(BaseModel):
+    """Modeler agent output: one chosen modeling approach, fully specified."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chosen_approach: str  # one-line approach name, e.g. "M/M/c per station"
+    rationale: str  # why this approach fits the problem
+    variables: list[Variable] = Field(default_factory=list, max_length=20)
+    equations: list[Equation] = Field(default_factory=list, max_length=15)
+    algorithm_outline: list[str] = Field(min_length=1, max_length=15)
+    complexity_notes: str | None = None
+    validation_strategy: str
 
 
 class CellExecution(BaseModel):
@@ -170,10 +198,27 @@ class CoderOutput(BaseModel):
     notebook_path: str  # absolute path to the written .ipynb
 
 
-class PaperDraft(BaseModel):
-    """Writer agent output. Stub for M1."""
+class PaperSection(BaseModel):
+    """One section of the paper — title + Markdown body (with LaTeX inline)."""
 
-    markdown: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    body_markdown: str  # Markdown with $LaTeX$ and $$display$$ inline
+
+
+class PaperDraft(BaseModel):
+    """Writer agent output: publication-grade paper as structured sections."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    abstract: str
+    sections: list[PaperSection] = Field(min_length=1, max_length=12)
+    references: list[str] = Field(default_factory=list, max_length=30)
+    figure_refs: list[str] = Field(
+        default_factory=list
+    )  # relative paths under runs/<id>/
 
 
 class RunResult(BaseModel):

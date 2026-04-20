@@ -20,6 +20,9 @@ importers:
       '@mathodology/contracts':
         specifier: workspace:*
         version: link:../../packages/ts-contracts
+      marked:
+        specifier: ^14
+        version: 14.1.4
       pinia:
         specifier: ^2.2.0
         version: 2.3.1(typescript@5.6.3)(vue@3.5.32(typescript@5.6.3))
@@ -1048,6 +1051,11 @@ packages:
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
+
+  marked@14.1.4:
+    resolution: {integrity: sha512-vkVZ8ONmUdPnjCKc5uTRvmkRbx4EAi2OkTOXmfTDhZz3OFqMNBM1oTTWwTr4HY4uAEojhzPf+Fy8F1DWa3Sndg==}
+    engines: {node: '>= 18'}
+    hasBin: true
 
   minimatch@10.2.5:
     resolution: {integrity: sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg==}
@@ -2238,6 +2246,8 @@ snapshots:
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  marked@14.1.4: {}
 
   minimatch@10.2.5:
     dependencies:

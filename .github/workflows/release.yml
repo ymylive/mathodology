@@ -22,9 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # pnpm version is pinned via root package.json `packageManager` field;
+      # passing `version:` here would collide (ERR_PNPM_BAD_PM_VERSION).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -75,7 +75,15 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          # Channel here is a fallback; rust-toolchain.toml (channel 1.83)
+          # takes precedence.
+          toolchain: stable
+
+      # `dtolnay/rust-toolchain`'s `targets:` input is ignored when a
+      # rust-toolchain.toml file pins a channel, so we add the cross
+      # target explicitly via rustup.
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:

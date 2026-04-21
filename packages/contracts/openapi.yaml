@@ -170,6 +170,16 @@ components:
         model_override:
           type: string
           description: Force a specific model; otherwise router picks per-agent defaults.
+        reasoning_effort:
+          type: string
+          enum: [off, low, medium, high]
+          default: medium
+          description: |
+            Cross-provider reasoning-effort hint. Translated in the gateway to
+            each provider's native API: OpenAI-compat emits `reasoning_effort`
+            + `reasoning.effort`; Anthropic emits
+            `thinking.budget_tokens` (low=1024, medium=4096, high=16384).
+            `off` suppresses emission entirely.
 
     Attachment:
       type: object
@@ -232,6 +242,15 @@ components:
         response_format:
           type: object
           additionalProperties: true
+        reasoning_effort:
+          type: string
+          enum: [off, low, medium, high]
+          description: |
+            Optional reasoning-effort hint. Gateway translates it per provider:
+            OpenAI-compat bodies get `reasoning_effort` and
+            `reasoning.effort` set; Anthropic bodies get
+            `thinking.budget_tokens` (low=1024, medium=4096, high=16384) plus a
+            conditional `max_tokens` bump. `off` or unset omits emission.
 
     ChatMessage:
       type: object

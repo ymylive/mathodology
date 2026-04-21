@@ -66,7 +66,10 @@ async fn handle_socket(
     tracing::debug!(%run_id, stream_key, last_seq, "ws subscribed to events stream");
 
     // --- Main loop: XREAD with short block timeout, interleaved with client recv ---
-    let opts = StreamReadOptions::default().block(500).count(32);
+    // block(100) keeps the loop tight so tokens XADDed by the gateway's LLM
+    // forwarder land in the browser within ~100ms of emission, instead of
+    // being batched in 500ms chunks that make streaming feel stuttery.
+    let opts = StreamReadOptions::default().block(100).count(64);
 
     loop {
         tokio::select! {

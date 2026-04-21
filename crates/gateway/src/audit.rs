@@ -61,7 +61,9 @@ async fn run_audit(state: AppState, run_id: Uuid) -> anyhow::Result<()> {
     let mut redis = state.redis.clone();
     let stream_key = events_stream_key(&run_id);
     let mut last_id = "0-0".to_string();
-    let opts = StreamReadOptions::default().block(1000).count(100);
+    // 300ms block: fast enough to keep DB audit near-real-time, not so tight
+    // that we hammer Redis while the run is idle.
+    let opts = StreamReadOptions::default().block(300).count(100);
     let started_at = Instant::now();
     let grace_secs = audit_grace_secs();
 

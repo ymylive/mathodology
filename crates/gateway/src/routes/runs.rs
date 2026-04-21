@@ -182,3 +182,86 @@ pub async fn get_run(
         "events": events_json,
     })))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ListQuery {
+    /// Max rows to return (default 20, cap 200).
+    pub limit: Option<u32>,
+    /// Filter by status (queued / running / done / failed / cancelled).
+    pub status: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct RunSummary {
+    id: Uuid,
+    status: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    problem_text: String,
+    competition_type: String,
+    cost_rmb: String,
+    notebook_path: Option<String>,
+    paper_path: Option<String>,
+}
+
+/// Light-weight listing endpoint for the Dashboard. Returns run headers
+/// sorted newest-first. No events joined — call GET /runs/:id for depth.
+#[tracing::instrument(skip_all)]
+pub async fn list_runs(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<ListQuery>,
+) -> Result<Json<Value>, AppError> {
+    let limit = q.limit.unwrap_or(20).clamp(1, 200) as i64;
+
+    let rows: Vec<RunSummary> = if let Some(st) = q.status.as_deref() {
+        sqlx::query_as::<_, RunSummary>(
+            r#"
+            SELECT id, status::text AS status, created_at, updated_at,
+                   problem_text, competition_type, cost_rmb::text AS cost_rmb,
+                   notebook_path, paper_path
+            FROM runs
+            WHERE status::text = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(st)
+        .bind(limit)
+        .fetch_all(&state.pg)
+        .await?
+    } else {
+        sqlx::query_as::<_, RunSummary>(
+            r#"
+            SELECT id, status::text AS status, created_at, updated_at,
+                   problem_text, competition_type, cost_rmb::text AS cost_rmb,
+                   notebook_path, paper_path
+            FROM runs
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&state.pg)
+        .await?
+    };
+
+    let items: Vec<Value> = rows
+        .into_iter()
+        .map(|r| {
+            let cost = r.cost_rmb.parse::<f64>().unwrap_or(0.0);
+            json!({
+                "run_id": r.id,
+                "status": r.status,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+                "problem_text": r.problem_text,
+                "competition_type": r.competition_type,
+                "cost_rmb": cost,
+                "notebook_path": r.notebook_path,
+                "paper_path": r.paper_path,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "items": items })))
+}

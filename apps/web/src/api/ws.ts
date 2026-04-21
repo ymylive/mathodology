@@ -25,7 +25,10 @@ export interface RunWsOptions {
 export class RunWsClient {
   private ws: WebSocket | null = null;
   private attempts = 0;
-  private lastSeq = -1;
+  // Starts at 0 not -1: the gateway deserializes `last_seq` into u64, which
+  // silently fails on negative values and defaults back to 0 anyway. Being
+  // explicit keeps the contract honest and avoids a wasted parse.
+  private lastSeq = 0;
   private closedByUser = false;
   private terminal = false;
 

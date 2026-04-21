@@ -121,7 +121,25 @@ impl AnthropicAdapter {
             }
         }
 
-        let max_tokens = req.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+        // Extended-thinking budget: canonical reasoning_effort → token
+        // budget. `off` and `None` emit nothing. `low/medium/high` map to
+        // Anthropic's `thinking.budget_tokens`. When thinking is enabled
+        // Anthropic requires `max_tokens > budget_tokens` and reasoning
+        // tokens count toward the output quota, so bump max_tokens to
+        // `budget + 1024` (a safe completion headroom above the budget).
+        let thinking_budget: u32 = match req.reasoning_effort.as_deref() {
+            Some("low") => 1024,
+            Some("medium") => 4096,
+            Some("high") => 16384,
+            _ => 0,
+        };
+
+        let base_max_tokens = req.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+        let max_tokens = if thinking_budget > 0 {
+            base_max_tokens.max(thinking_budget + 1024)
+        } else {
+            base_max_tokens
+        };
 
         let mut body = json!({
             "model": req.model,
@@ -134,6 +152,12 @@ impl AnthropicAdapter {
         }
         if let Some(t) = req.temperature {
             body["temperature"] = json!(t);
+        }
+        if thinking_budget > 0 {
+            body["thinking"] = json!({
+                "type": "enabled",
+                "budget_tokens": thinking_budget,
+            });
         }
         body
     }
@@ -491,6 +515,7 @@ mod tests {
             max_tokens: None,
             stream: false,
             response_format: None,
+            reasoning_effort: None,
         }
     }
 
@@ -536,6 +561,73 @@ mod tests {
         ]);
         let body = adapter.build_body(&req, false);
         assert_eq!(body["system"], "one\n\ntwo");
+    }
+
+    #[test]
+    fn build_body_emits_thinking_for_high_and_bumps_max_tokens() {
+        let adapter = AnthropicAdapter::new(
+            "anth".into(),
+            "https://x".into(),
+            "k".into(),
+            vec!["claude-sonnet-4-6".into()],
+            Client::new(),
+        );
+        let mut req = mk_req_with(vec![("user", "go")]);
+        req.reasoning_effort = Some("high".into());
+        let body = adapter.build_body(&req, false);
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"], 16384);
+        // max_tokens must be at least budget + 1024 (thinking headroom).
+        let mt = body["max_tokens"].as_u64().unwrap();
+        assert!(
+            mt >= 16384 + 1024,
+            "max_tokens {mt} must be at least budget+1024",
+        );
+    }
+
+    #[test]
+    fn build_body_emits_thinking_for_low_and_medium() {
+        let adapter = AnthropicAdapter::new(
+            "anth".into(),
+            "https://x".into(),
+            "k".into(),
+            vec!["claude-sonnet-4-6".into()],
+            Client::new(),
+        );
+        for (level, expected) in [("low", 1024_u64), ("medium", 4096_u64)] {
+            let mut req = mk_req_with(vec![("user", "go")]);
+            req.reasoning_effort = Some(level.into());
+            let body = adapter.build_body(&req, false);
+            assert_eq!(body["thinking"]["budget_tokens"], expected, "level {level}");
+            let mt = body["max_tokens"].as_u64().unwrap();
+            assert!(mt >= expected + 1024, "max_tokens {mt} < budget+1024 for {level}");
+        }
+    }
+
+    #[test]
+    fn build_body_no_thinking_on_off_or_none() {
+        let adapter = AnthropicAdapter::new(
+            "anth".into(),
+            "https://x".into(),
+            "k".into(),
+            vec!["claude-sonnet-4-6".into()],
+            Client::new(),
+        );
+        // off
+        let mut req = mk_req_with(vec![("user", "go")]);
+        req.reasoning_effort = Some("off".into());
+        let body = adapter.build_body(&req, false);
+        assert!(body.get("thinking").is_none(), "off must suppress thinking");
+        assert_eq!(body["max_tokens"], DEFAULT_MAX_TOKENS);
+
+        // None (unset)
+        let req = mk_req_with(vec![("user", "go")]);
+        let body = adapter.build_body(&req, false);
+        assert!(
+            body.get("thinking").is_none(),
+            "unset reasoning_effort must suppress thinking"
+        );
+        assert_eq!(body["max_tokens"], DEFAULT_MAX_TOKENS);
     }
 
     #[test]

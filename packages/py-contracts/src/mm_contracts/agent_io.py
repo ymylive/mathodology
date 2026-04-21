@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 AttachmentKind = Literal["csv", "xlsx", "pdf", "image", "text"]
 CompetitionType = Literal["mcm", "icm", "cumcm", "huashu", "other"]
+ReasoningEffort = Literal["off", "low", "medium", "high"]
 
 
 class Attachment(BaseModel):
@@ -33,10 +34,18 @@ class Attachment(BaseModel):
 class ProblemInput(BaseModel):
     """Problem payload submitted by the user, carried on the `mm:jobs` stream."""
 
+    model_config = ConfigDict(extra="forbid")
+
     problem_text: str
     competition_type: CompetitionType = "other"
     attachments: list[Attachment] = Field(default_factory=list)
     model_override: str | None = None
+    reasoning_effort: ReasoningEffort = "medium"
+    # Opt-in to a 1M-token max_tokens ceiling for models that advertise
+    # long-context. When false, we cap at 20k (safe for all providers).
+    # User-supplied: disable for default models, enable only for 1M-
+    # capable variants (Claude 3.5 Sonnet 1M beta, Gemini 2.0, gpt-5-1m).
+    long_context: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +139,14 @@ class AnalyzerOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     restated_problem: str = Field(min_length=10)
-    sub_questions: list[str] = Field(min_length=1, max_length=10)
-    assumptions: list[str] = Field(default_factory=list, max_length=15)
-    data_requirements: list[DataRequirement] = Field(default_factory=list, max_length=10)
-    proposed_approaches: list[ApproachSketch] = Field(min_length=1, max_length=3)
+    # Relaxed caps — real MCM problems at high reasoning routinely exceed
+    # the earlier tight limits (observed: Modeler returned 38 variables /
+    # 24 equations for a stochastic EV planning problem, forcing a retry
+    # loop + eventual parse failure). Keep soft caps to bound memory use.
+    sub_questions: list[str] = Field(min_length=1, max_length=30)
+    assumptions: list[str] = Field(default_factory=list, max_length=40)
+    data_requirements: list[DataRequirement] = Field(default_factory=list, max_length=25)
+    proposed_approaches: list[ApproachSketch] = Field(min_length=1, max_length=6)
 
 
 class Variable(BaseModel):
@@ -192,9 +205,9 @@ class ModelSpec(BaseModel):
 
     chosen_approach: str  # one-line approach name, e.g. "M/M/c per station"
     rationale: str  # why this approach fits the problem
-    variables: list[Variable] = Field(default_factory=list, max_length=20)
-    equations: list[Equation] = Field(default_factory=list, max_length=15)
-    algorithm_outline: list[str] = Field(min_length=1, max_length=15)
+    variables: list[Variable] = Field(default_factory=list, max_length=80)
+    equations: list[Equation] = Field(default_factory=list, max_length=50)
+    algorithm_outline: list[str] = Field(min_length=1, max_length=40)
     complexity_notes: str | None = None
     validation_strategy: str
     consulted_methods: list[ConsultedMethod] = Field(

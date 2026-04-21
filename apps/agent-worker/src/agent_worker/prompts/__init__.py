@@ -12,6 +12,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from mm_contracts import ReasoningEffort
 from pydantic import BaseModel, ConfigDict
 
 _PROMPTS_DIR = Path(__file__).parent
@@ -35,6 +36,9 @@ class PromptSpec(BaseModel):
     system: dict[str, Any]  # {"text": str}
     user_template: dict[str, Any]  # {"text": str}
     response_schema: dict[str, Any]  # {"kind": str, "name": str}
+    # Optional per-agent override for reasoning effort. `None` means inherit
+    # the run-level setting from `ProblemInput.reasoning_effort`.
+    reasoning_effort: ReasoningEffort | None = None
 
     def render_user(self, **vars: Any) -> str:
         """Render the user template. Missing vars → empty string (never raises)."""

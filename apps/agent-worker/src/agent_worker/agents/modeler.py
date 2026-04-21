@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from mm_contracts import AnalyzerOutput, ModelSpec, ProblemInput
+from mm_contracts import AnalyzerOutput, ModelSpec, ProblemInput, ReasoningEffort
 
 from agent_worker.agents.base import BaseAgent
 from agent_worker.events import EventEmitter
@@ -35,8 +35,9 @@ class ModelerAgent(BaseAgent):
         emitter: EventEmitter,
         hmml: HMMLService | None = None,
         prompt_version: str = "v1",
+        run_effort: ReasoningEffort = "medium",
     ) -> None:
-        super().__init__(gateway, emitter, prompt_version)
+        super().__init__(gateway, emitter, prompt_version, run_effort=run_effort)
         self.hmml = hmml
 
     async def run_for(

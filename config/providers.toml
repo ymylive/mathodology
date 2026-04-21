@@ -1,3 +1,12 @@
+[[providers]]
+name = "cornna"
+kind = "openai_compat"
+base_url = "https://cdnapi.cornna.xyz/v1"
+api_key_env = "CORNNA_API_KEY"
+models = ["gpt-5.4"]
+price_input_per_1m = 5.0
+price_output_per_1m = 15.0
+
 # LLM provider registry. Loaded by the Rust gateway at startup, hot-reloadable via SIGHUP.
 # API keys are read from env vars named by api_key_env; they do NOT live in this file.
 # price_* fields are RMB per 1M tokens.

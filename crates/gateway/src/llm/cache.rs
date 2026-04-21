@@ -53,6 +53,10 @@ pub fn cache_key(req: &CanonicalRequest) -> String {
         "temperature": req.temperature,
         "max_tokens": req.max_tokens,
         "response_format": rf,
+        // Reasoning-effort changes the downstream request body (OpenAI-compat
+        // reasoning fields / Anthropic thinking budget), so cached responses
+        // at different efforts are not interchangeable.
+        "reasoning_effort": req.reasoning_effort,
     });
 
     // `serde_json::to_vec` on a Value preserves insertion order of the outer
@@ -134,6 +138,7 @@ mod tests {
                 "type": "json_object",
                 "schema": {"a": 1, "b": 2}
             })),
+            reasoning_effort: None,
         }
     }
 

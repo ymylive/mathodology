@@ -73,6 +73,20 @@ pub struct ProviderRegistry {
     pub default_model: String,
     pub fallback: Vec<String>,
     pub prices: PriceTable,
+    pub meta: Vec<ProviderMeta>,
+}
+
+/// Read-only provider metadata for GET /providers. Mirrors ProviderEntry
+/// fields kept after registry load, plus a `has_key` flag so the UI can
+/// grey out providers missing their API key without leaking the key.
+#[derive(Debug, Clone)]
+pub struct ProviderMeta {
+    pub name: String,
+    pub kind: String,
+    pub models: Vec<String>,
+    pub price_input_per_1m: f64,
+    pub price_output_per_1m: f64,
+    pub has_key: bool,
 }
 
 impl ProviderRegistry {
@@ -93,6 +107,7 @@ impl ProviderRegistry {
 
         let prices = PriceTable::default();
         let mut providers: Vec<Arc<dyn ProviderAdapter>> = Vec::new();
+        let mut meta: Vec<ProviderMeta> = Vec::new();
 
         for p in parsed.providers {
             // Price table is populated regardless of adapter availability so
@@ -107,9 +122,11 @@ impl ProviderRegistry {
                 );
             }
 
+            let api_key = resolve_api_key(&p.api_key_env, &p.name);
+            let has_key = !api_key.is_empty();
+
             match p.kind.as_str() {
                 "openai_compat" => {
-                    let api_key = resolve_api_key(&p.api_key_env, &p.name);
                     let adapter = OpenAICompatAdapter::new(
                         p.name.clone(),
                         p.base_url.clone(),
@@ -120,7 +137,6 @@ impl ProviderRegistry {
                     providers.push(Arc::new(adapter));
                 }
                 "anthropic" => {
-                    let api_key = resolve_api_key(&p.api_key_env, &p.name);
                     let adapter = AnthropicAdapter::new(
                         p.name.clone(),
                         p.base_url.clone(),
@@ -136,8 +152,18 @@ impl ProviderRegistry {
                         kind = other,
                         "unknown provider kind; skipping"
                     );
+                    continue;
                 }
             }
+
+            meta.push(ProviderMeta {
+                name: p.name,
+                kind: p.kind,
+                models: p.models,
+                price_input_per_1m: p.price_input_per_1m,
+                price_output_per_1m: p.price_output_per_1m,
+                has_key,
+            });
         }
 
         Ok(Self {
@@ -145,6 +171,7 @@ impl ProviderRegistry {
             default_model: parsed.router.default_model,
             fallback: parsed.router.fallback,
             prices,
+            meta,
         })
     }
 }

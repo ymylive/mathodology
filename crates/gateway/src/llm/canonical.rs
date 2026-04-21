@@ -31,6 +31,19 @@ pub struct CanonicalRequest {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<Value>,
+    /// Canonical reasoning-effort hint. Accepted values:
+    /// `"off" | "low" | "medium" | "high"`.
+    ///
+    /// Adapters translate per provider:
+    /// - OpenAI-compat: emit both `reasoning_effort` and `reasoning.effort`
+    ///   at the top of the body.
+    /// - Anthropic: emit `thinking: {type: "enabled", budget_tokens: N}`
+    ///   where `low=1024`, `medium=4096`, `high=16384` and bump
+    ///   `max_tokens >= budget + 1024`.
+    ///
+    /// `"off"` and `None` both suppress emission entirely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

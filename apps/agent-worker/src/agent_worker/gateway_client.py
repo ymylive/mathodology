@@ -49,6 +49,7 @@ class GatewayClient:
         max_tokens: int | None,
         response_format: dict[str, Any] | None,
         stream: bool,
+        reasoning_effort: str | None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": model,
@@ -60,6 +61,11 @@ class GatewayClient:
             body["max_tokens"] = max_tokens
         if response_format is not None:
             body["response_format"] = response_format
+        # Forward reasoning-effort hint verbatim. Gateway translates per
+        # provider; when the value is "off" it's an explicit suppression
+        # signal (adapters must emit NEITHER the OpenAI nor Anthropic fields).
+        if reasoning_effort is not None:
+            body["reasoning_effort"] = reasoning_effort
         return body
 
     async def stream_completion(
@@ -72,6 +78,7 @@ class GatewayClient:
         temperature: float = 0.2,
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
+        reasoning_effort: str | None = None,
     ) -> AsyncIterator[str]:
         """Yield text deltas from the gateway's SSE stream.
 
@@ -88,6 +95,7 @@ class GatewayClient:
             max_tokens=max_tokens,
             response_format=response_format,
             stream=True,
+            reasoning_effort=reasoning_effort,
         )
 
         async with self._client.stream("POST", url, headers=headers, json=body) as resp:
@@ -123,6 +131,7 @@ class GatewayClient:
         temperature: float = 0.2,
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         """Non-streaming chat completion. Returns the assistant message text.
 
@@ -137,6 +146,7 @@ class GatewayClient:
             max_tokens=max_tokens,
             response_format=response_format,
             stream=False,
+            reasoning_effort=reasoning_effort,
         )
 
         resp = await self._client.post(url, headers=headers, json=body)

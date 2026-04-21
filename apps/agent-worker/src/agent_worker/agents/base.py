@@ -10,6 +10,7 @@ import time
 from typing import Any, ClassVar
 
 import orjson
+from mm_contracts import ReasoningEffort
 from pydantic import BaseModel, ValidationError
 
 from agent_worker.events import EventEmitter
@@ -36,10 +37,16 @@ class BaseAgent:
         gateway: GatewayClient,
         emitter: EventEmitter,
         prompt_version: str = "v1",
+        run_effort: ReasoningEffort = "medium",
+        long_context: bool = False,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
         self.prompt = load_prompt(self.AGENT_NAME, prompt_version)
+        # Run-level reasoning effort from `ProblemInput.reasoning_effort`.
+        # Individual prompt specs may override via `PromptSpec.reasoning_effort`.
+        self._run_effort: ReasoningEffort = run_effort
+        self._long_context: bool = long_context
 
     async def run(self, **template_vars: Any) -> BaseModel:
         """Emit stage.start, call the LLM (with one parse-retry), emit output + stage.done."""
@@ -106,6 +113,7 @@ class BaseAgent:
         self, model: str, messages: list[dict[str, Any]]
     ) -> str:
         """Consume the gateway's SSE stream and concatenate text deltas."""
+        effort = self.prompt.reasoning_effort or self._run_effort
         parts: list[str] = []
         async for delta in self.gateway.stream_completion(
             run_id=self.emitter.run_id,
@@ -113,8 +121,14 @@ class BaseAgent:
             model=model,
             messages=messages,
             temperature=self.prompt.temperature,
-            max_tokens=self.prompt.token_budget_out,
+            # 20k default, 1M when the user opts into long context (only
+            # sensible on models that advertise 1M — Claude 3.5 Sonnet 1M
+            # beta, Gemini 2.0, gpt-5-1m). Un-capping (`None`) makes some
+            # OpenAI-compat proxies fall back to a 1k-4k default; an
+            # explicit cap avoids that trap.
+            max_tokens=1_000_000 if self._long_context else 20000,
             response_format={"type": "json_object"},
+            reasoning_effort=effort,
         ):
             parts.append(delta)
         return "".join(parts)

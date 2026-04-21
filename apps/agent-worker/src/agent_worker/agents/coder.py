@@ -22,6 +22,7 @@ from mm_contracts import (
     CoderOutput,
     ModelSpec,
     ProblemInput,
+    ReasoningEffort,
 )
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -57,11 +58,15 @@ class CoderAgent:
         emitter: EventEmitter,
         kernel: KernelSession,
         prompt_version: str = "v1",
+        run_effort: ReasoningEffort = "medium",
+        long_context: bool = False,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
         self.kernel = kernel
         self.prompt = load_prompt(self.AGENT_NAME, prompt_version)
+        self._run_effort: ReasoningEffort = run_effort
+        self._long_context: bool = long_context
 
     async def run(
         self,
@@ -208,6 +213,7 @@ class CoderAgent:
     async def _stream_and_collect(
         self, model: str, messages: list[dict[str, Any]]
     ) -> str:
+        effort = self.prompt.reasoning_effort or self._run_effort
         parts: list[str] = []
         async for delta in self.gateway.stream_completion(
             run_id=self.emitter.run_id,
@@ -215,8 +221,10 @@ class CoderAgent:
             model=model,
             messages=messages,
             temperature=self.prompt.temperature,
-            max_tokens=self.prompt.token_budget_out,
+            # 20k default, 1M when long-context opt-in is set. See base.py.
+            max_tokens=1_000_000 if self._long_context else 20000,
             response_format={"type": "json_object"},
+            reasoning_effort=effort,
         ):
             parts.append(delta)
         return "".join(parts)

@@ -49,3 +49,4 @@ packages/py-contracts/src/mm_contracts/generated.py
 
 # Claude Code runtime state (editor scheduler, local-only)
 /.claude/
+config/providers.toml.bak

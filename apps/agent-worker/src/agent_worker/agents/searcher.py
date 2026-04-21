@@ -19,7 +19,13 @@ import time
 from typing import Any
 
 import orjson
-from mm_contracts import AnalyzerOutput, Paper, ProblemInput, SearchFindings
+from mm_contracts import (
+    AnalyzerOutput,
+    Paper,
+    ProblemInput,
+    ReasoningEffort,
+    SearchFindings,
+)
 from pydantic import ValidationError
 
 from agent_worker.agents.base import AgentError, AgentParseError
@@ -42,10 +48,14 @@ class SearcherAgent:
         gateway: GatewayClient,
         emitter: EventEmitter,
         prompt_version: str = "v1",
+        run_effort: ReasoningEffort = "medium",
+        long_context: bool = False,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
         self.prompt = load_prompt(self.AGENT_NAME, prompt_version)
+        self._run_effort: ReasoningEffort = run_effort
+        self._long_context: bool = long_context
 
     async def run_for(
         self, problem: ProblemInput, analysis: AnalyzerOutput
@@ -250,6 +260,7 @@ class SearcherAgent:
     async def _stream_and_collect(
         self, model: str, messages: list[dict[str, Any]]
     ) -> str:
+        effort = self.prompt.reasoning_effort or self._run_effort
         parts: list[str] = []
         async for delta in self.gateway.stream_completion(
             run_id=self.emitter.run_id,
@@ -257,8 +268,10 @@ class SearcherAgent:
             model=model,
             messages=messages,
             temperature=self.prompt.temperature,
-            max_tokens=self.prompt.token_budget_out,
+            # 20k default, 1M when long-context opt-in is set. See base.py.
+            max_tokens=1_000_000 if self._long_context else 20000,
             response_format={"type": "json_object"},
+            reasoning_effort=effort,
         ):
             parts.append(delta)
         return "".join(parts)

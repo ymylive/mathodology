@@ -67,6 +67,17 @@ impl OpenAICompatAdapter {
         if stream {
             body["stream_options"] = json!({"include_usage": true});
         }
+        // Reasoning-effort translation. Older OpenAI-compat providers
+        // (DeepSeek-Reasoner, Moonshot/Kimi, etc.) read `reasoning_effort` at
+        // the top level. Newer OpenAI variants use `reasoning: {effort: ...}`.
+        // Emit both; providers that don't know a field silently ignore it.
+        // `"off"` is an explicit suppression signal — emit neither field.
+        if let Some(level) = req.reasoning_effort.as_deref() {
+            if matches!(level, "low" | "medium" | "high") {
+                body["reasoning_effort"] = json!(level);
+                body["reasoning"] = json!({ "effort": level });
+            }
+        }
         body
     }
 
@@ -196,3 +207,73 @@ fn parse_openai_chunk(data: &str) -> Result<CanonicalChunk, ProviderError> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::canonical::ChatMessage;
+
+    fn mk_req() -> CanonicalRequest {
+        CanonicalRequest {
+            model: "gpt-5".into(),
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "hi".into(),
+                name: None,
+            }],
+            temperature: Some(0.2),
+            max_tokens: None,
+            stream: false,
+            response_format: None,
+            reasoning_effort: None,
+        }
+    }
+
+    fn mk_adapter() -> OpenAICompatAdapter {
+        OpenAICompatAdapter::new(
+            "mock".into(),
+            "https://example.invalid".into(),
+            "sk".into(),
+            vec!["gpt-5".into()],
+            Client::new(),
+        )
+    }
+
+    #[test]
+    fn build_body_emits_both_reasoning_fields_when_high() {
+        let adapter = mk_adapter();
+        let mut req = mk_req();
+        req.reasoning_effort = Some("high".into());
+        let body = adapter.build_body(&req, false);
+        assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(body["reasoning"]["effort"], "high");
+    }
+
+    #[test]
+    fn build_body_emits_both_reasoning_fields_when_low() {
+        let adapter = mk_adapter();
+        let mut req = mk_req();
+        req.reasoning_effort = Some("low".into());
+        let body = adapter.build_body(&req, true);
+        assert_eq!(body["reasoning_effort"], "low");
+        assert_eq!(body["reasoning"]["effort"], "low");
+    }
+
+    #[test]
+    fn build_body_suppresses_on_off() {
+        let adapter = mk_adapter();
+        let mut req = mk_req();
+        req.reasoning_effort = Some("off".into());
+        let body = adapter.build_body(&req, false);
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn build_body_suppresses_on_none() {
+        let adapter = mk_adapter();
+        let req = mk_req();
+        let body = adapter.build_body(&req, false);
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+}

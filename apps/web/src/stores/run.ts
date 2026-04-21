@@ -119,6 +119,15 @@ export const useRunStore = defineStore("run", {
     orderedEvents(state): AgentEvent[] {
       return [...state.events].sort((a, b) => a.seq - b.seq);
     },
+    // Latest SearchFindings payload (from the searcher agent), or null if
+    // the searcher hasn't emitted yet. Kept as a getter so views can
+    // cheaply check `!!store.searcherFindings` before rendering the panel.
+    searcherFindings(state): Record<string, unknown> | null {
+      const ent = state.outputs["searcher"];
+      if (!ent) return null;
+      if (ent.schemaName !== "SearchFindings") return null;
+      return ent.output;
+    },
   },
 
   actions: {
@@ -138,14 +147,25 @@ export const useRunStore = defineStore("run", {
       this.notebookPath = null;
     },
 
-    async startRun(problemText: string) {
+    async startRun(
+      problemText: string,
+      opts: {
+        reasoningEffort?: "off" | "low" | "medium" | "high";
+        longContext?: boolean;
+      } = {},
+    ) {
       if (this.status === "running" || this.status === "queued") return;
       this.reset();
       this.status = "queued";
       try {
-        const res = await http.post<RunCreated>("/runs", {
-          problem_text: problemText,
-        });
+        const body: Record<string, unknown> = { problem_text: problemText };
+        if (opts.reasoningEffort !== undefined) {
+          body["reasoning_effort"] = opts.reasoningEffort;
+        }
+        if (opts.longContext !== undefined) {
+          body["long_context"] = opts.longContext;
+        }
+        const res = await http.post<RunCreated>("/runs", body);
         this.runId = res.run_id;
         this.openWs(res.run_id);
       } catch (err) {

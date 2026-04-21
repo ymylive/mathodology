@@ -40,9 +40,23 @@ pub async fn chat_completions(
     Json(body): Json<Value>,
 ) -> Result<Response, AppError> {
     // Parse the body into our canonical request. Extra fields are ignored.
-    let req: CanonicalRequest = serde_json::from_value(body.clone()).map_err(|e| {
-        AppError::BadRequest(format!("invalid chat completion body: {e}"))
-    })?;
+    let mut req: CanonicalRequest =
+        serde_json::from_value(body.clone()).map_err(|e| {
+            AppError::BadRequest(format!("invalid chat completion body: {e}"))
+        })?;
+
+    // Validate reasoning_effort: must be one of {off, low, medium, high}. Drop
+    // (with a WARN) on anything else instead of failing the whole request,
+    // mirroring how unknown fields are tolerated elsewhere on the hot path.
+    if let Some(level) = req.reasoning_effort.as_deref() {
+        if !matches!(level, "off" | "low" | "medium" | "high") {
+            tracing::warn!(
+                reasoning_effort = %level,
+                "unknown reasoning_effort value; dropping"
+            );
+            req.reasoning_effort = None;
+        }
+    }
 
     let run_id = parse_run_id(&headers)?;
     let agent = header_str(&headers, "x-agent");

@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from mm_contracts import PaperDraft, ProblemInput
@@ -70,19 +71,27 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
 
     try:
         try:
-            analyzer = AnalyzerAgent(gateway, emitter)
+            # Run-level reasoning effort threaded into every agent so each
+            # `gateway.stream_completion` call carries the hint verbatim. Per-
+            # agent PromptSpec overrides win on a call-by-call basis.
+            kwargs: dict[str, Any] = {
+                "run_effort": problem.reasoning_effort,
+                "long_context": problem.long_context,
+            }
+
+            analyzer = AnalyzerAgent(gateway, emitter, **kwargs)
             analysis = await analyzer.run_for_problem(problem)
 
-            searcher = SearcherAgent(gateway, emitter)
+            searcher = SearcherAgent(gateway, emitter, **kwargs)
             findings = await searcher.run_for(problem, analysis)
 
-            modeler = ModelerAgent(gateway, emitter, hmml=hmml)
+            modeler = ModelerAgent(gateway, emitter, hmml=hmml, **kwargs)
             spec = await modeler.run_for(problem, analysis)
 
-            coder = CoderAgent(gateway, emitter, kernel)
+            coder = CoderAgent(gateway, emitter, kernel, **kwargs)
             coder_out = await coder.run(problem, analysis, spec)
 
-            writer = WriterAgent(gateway, emitter)
+            writer = WriterAgent(gateway, emitter, **kwargs)
             paper = await writer.run_for(
                 problem, analysis, spec, coder_out, findings
             )

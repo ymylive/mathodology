@@ -18,9 +18,18 @@ use uuid::Uuid;
 use crate::dispatch::events_stream_key;
 use crate::state::AppState;
 
-/// Overall grace timeout: if nothing arrives within this many seconds from
-/// spawn, we give up (M2 assumption; M3 will lengthen or replace this).
-const AUDIT_GRACE_SECS: u64 = 600;
+/// Overall grace timeout: if the run hasn't hit a terminal event within
+/// this many seconds, we abandon it. Configurable via `AUDIT_GRACE_SECS`
+/// env var. Default 3600s (1 hour) — real-LLM runs with slow providers
+/// (gpt-5.4 via cdnapi routinely exceed the original 600s ceiling),
+/// which caused DB state (notebook_path, paper_path, cost_rmb) to never
+/// get persisted for long-running jobs.
+fn audit_grace_secs() -> u64 {
+    std::env::var("AUDIT_GRACE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3600)
+}
 
 /// Minimum parsed shape of the event envelope (events.schema.json).
 #[derive(Debug, Deserialize)]
@@ -54,15 +63,16 @@ async fn run_audit(state: AppState, run_id: Uuid) -> anyhow::Result<()> {
     let mut last_id = "0-0".to_string();
     let opts = StreamReadOptions::default().block(1000).count(100);
     let started_at = Instant::now();
+    let grace_secs = audit_grace_secs();
 
-    tracing::debug!(%run_id, stream_key, "audit task started");
+    tracing::debug!(%run_id, stream_key, grace_secs, "audit task started");
 
     loop {
         // Grace timeout guard.
-        if started_at.elapsed() > Duration::from_secs(AUDIT_GRACE_SECS) {
+        if started_at.elapsed() > Duration::from_secs(grace_secs) {
             tracing::warn!(
                 %run_id,
-                grace_secs = AUDIT_GRACE_SECS,
+                grace_secs,
                 "audit task grace timeout hit; exiting"
             );
             return Ok(());

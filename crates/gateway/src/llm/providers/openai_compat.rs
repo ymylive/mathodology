@@ -60,6 +60,13 @@ impl OpenAICompatAdapter {
         if let Some(ref rf) = req.response_format {
             body["response_format"] = rf.clone();
         }
+        // OpenAI spec: streaming usage is opt-in. Must-have for cost_ledger.
+        // Some proxies (DeepSeek / Moonshot) auto-emit usage on their own,
+        // but strict OpenAI-compliant proxies (e.g. the cdnapi.cornna.xyz
+        // gpt-5.4 route) only include it when this flag is set.
+        if stream {
+            body["stream_options"] = json!({"include_usage": true});
+        }
         body
     }
 

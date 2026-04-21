@@ -37,9 +37,9 @@ dump.rdb
 !.vscode/settings.json
 !.vscode/extensions.json
 
-# Generated
+# Generated (py-contracts/generated.py is checked in as a stub; TS stub
+# is checked in too so clean checkouts typecheck before `just gen-ts`)
 packages/py-contracts/src/mm_contracts/generated.py
-packages/ts-contracts/src/generated.ts
 
 # Docker volumes
 /docker-data/

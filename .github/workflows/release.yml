@@ -164,13 +164,13 @@ jobs:
           # Common files shipped in every bundle.
           stage_common() {
             local root="$1"
-            mkdir -p "$root"/{apps,crates,packages,config,scripts}
+            mkdir -p "$root/apps/web" "$root/crates/gateway" \
+                     "$root/packages" "$root/config" "$root/scripts"
             # Full Python worker source + shared contracts.
             cp -R apps/agent-worker "$root/apps/"
             cp -R packages/py-contracts "$root/packages/"
             cp -R packages/contracts "$root/packages/"
             # Web static bundle.
-            mkdir -p "$root/apps/web"
             cp -R artifacts/web-dist "$root/apps/web/dist"
             # Gateway migrations (sqlx needs them at runtime).
             cp -R crates/gateway/migrations "$root/crates/gateway/migrations"
@@ -179,7 +179,8 @@ jobs:
             cp .env.example "$root/"
             cp scripts/release-run.sh "$root/run.sh"
             cp scripts/release-run.ps1 "$root/run.ps1"
-            cp README.md LICENSE 2>/dev/null "$root/" || true
+            cp README.md "$root/" 2>/dev/null || true
+            cp LICENSE "$root/" 2>/dev/null || true
             cp docker-compose.yml "$root/" 2>/dev/null || true
             # Version stamp.
             echo "$V" > "$root/VERSION"

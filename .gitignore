@@ -46,3 +46,6 @@ packages/ts-contracts/src/generated.ts
 
 # Local caches
 .cache/
+
+# Claude Code runtime state (editor scheduler, local-only)
+/.claude/

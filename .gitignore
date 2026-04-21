@@ -43,3 +43,6 @@ packages/ts-contracts/src/generated.ts
 
 # Docker volumes
 /docker-data/
+
+# Local caches
+.cache/

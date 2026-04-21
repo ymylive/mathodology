@@ -20,6 +20,7 @@ dependencies = [
   "scipy>=1.13",
   "scikit-learn>=1.5",
   "rank-bm25>=0.2.2",
+  "fastembed>=0.4",
   "defusedxml>=0.7",
 ]
 

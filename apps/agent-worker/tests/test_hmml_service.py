@@ -12,7 +12,9 @@ from agent_worker.hmml import HMMLService
 
 @pytest.fixture(scope="module")
 def service() -> HMMLService:
-    return HMMLService.from_seed_dir()
+    # Keep the BM25-only test suite offline/network-free and fast: the M11
+    # vector channel is covered in `test_hmml_fusion.py` with a stub embedder.
+    return HMMLService.from_seed_dir(enable_vector=False)
 
 
 def test_seed_dir_loads_at_least_30_methods(service: HMMLService) -> None:
@@ -77,3 +79,16 @@ def test_scores_are_monotonically_non_increasing(service: HMMLService) -> None:
 def test_empty_service_returns_empty_results() -> None:
     empty = HMMLService(methods=[])
     assert empty.retrieve("anything", top_k=5) == []
+
+
+def test_retrieve_hybrid_degrades_to_bm25_without_embedder() -> None:
+    """Without a vector index (embedder=None), hybrid MUST equal BM25."""
+    bm25_only = HMMLService.from_seed_dir(enable_vector=False)
+    assert not bm25_only.has_vector_index
+    q = "linear regression fit with ordinary least squares"
+    bm25_out = bm25_only.retrieve(q, top_k=3)
+    hybrid_out = bm25_only.retrieve_hybrid(q, top_k=3)
+    assert [m.id for m, _ in bm25_out] == [m.id for m, _ in hybrid_out]
+    assert [round(s, 6) for _, s in bm25_out] == [
+        round(s, 6) for _, s in hybrid_out
+    ]

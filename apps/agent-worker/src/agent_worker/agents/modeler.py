@@ -50,7 +50,7 @@ class ModelerAgent(BaseAgent):
                 f"{analysis.restated_problem}\n"
                 + " ".join(analysis.sub_questions)
             )
-            retrieved = self.hmml.retrieve(query, top_k=5)
+            retrieved = self.hmml.retrieve_hybrid(query, top_k=5)
             if retrieved:
                 await self.emitter.emit(
                     "log",
@@ -86,7 +86,7 @@ class ModelerAgent(BaseAgent):
         for m, score in retrieved:
             pitfalls = "; ".join(m.common_pitfalls) or "(none listed)"
             blocks.append(
-                f"### {m.name} (id: {m.id}, score: {score:.2f})\n"
+                f"### {m.name} (id: {m.id}, score: {score:.3f})\n"
                 f"- Domain: {m.domain} / {m.subdomain}\n"
                 f"- Applicable: {'; '.join(m.applicable_scenarios)}\n"
                 f"- Canonical form: ${m.math_form}$\n"

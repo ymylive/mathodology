@@ -94,6 +94,11 @@ jobs:
           EOF
 
       - name: Build gateway (release)
+        env:
+          # Needed when cross-compiling crates with C code (ring, etc.) for aarch64-linux.
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release -p gateway --target ${{ matrix.target }}
 
       - name: Package binary

@@ -57,8 +57,12 @@ jobs:
             platform: linux-aarch64
             ext: ""
             cross: true
+          # macos-13 Intel runners are being deprecated and often spend
+          # 10+ min queued. Cross-compile x86_64-darwin from the Apple
+          # Silicon macos-14 runner instead — zero native deps in gateway
+          # (rustls-tls, no ring-via-native).
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-14
             platform: macos-x86_64
             ext: ""
           - target: aarch64-apple-darwin

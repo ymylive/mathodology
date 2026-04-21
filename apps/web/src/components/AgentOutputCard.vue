@@ -4,6 +4,7 @@ import AnalyzerOutputView from "@/components/AnalyzerOutputView.vue";
 import CoderOutputView from "@/components/CoderOutputView.vue";
 import ModelSpecView from "@/components/ModelSpecView.vue";
 import PaperDraftView from "@/components/PaperDraftView.vue";
+import SearchFindingsView from "@/components/SearchFindingsView.vue";
 import { useRunStore } from "@/stores/run";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -88,6 +89,9 @@ const isAnalyzer = computed(() => props.schemaName === "AnalyzerOutput");
 const isCoder = computed(() => props.schemaName === "CoderOutput");
 const isModelSpec = computed(() => props.schemaName === "ModelSpec");
 const isPaperDraft = computed(() => props.schemaName === "PaperDraft");
+const isSearchFindings = computed(
+  () => props.schemaName === "SearchFindings",
+);
 
 const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
 </script>
@@ -165,6 +169,11 @@ const prettyJson = computed(() => JSON.stringify(props.output, null, 2));
       <ModelSpecView v-else-if="isModelSpec" :output="output" />
       <PaperDraftView
         v-else-if="isPaperDraft"
+        :output="output"
+        :run-id="store.runId ?? ''"
+      />
+      <SearchFindingsView
+        v-else-if="isSearchFindings"
         :output="output"
         :run-id="store.runId ?? ''"
       />

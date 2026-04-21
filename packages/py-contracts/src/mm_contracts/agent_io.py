@@ -253,6 +253,37 @@ class PaperDraft(BaseModel):
     )  # relative paths under runs/<id>/
 
 
+# ---------------------------------------------------------------------------
+# Searcher agent (M10)
+# ---------------------------------------------------------------------------
+
+
+class Paper(BaseModel):
+    """One retrieved paper (arXiv in M10; extensible to other sources later)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    authors: list[str] = Field(default_factory=list, max_length=20)
+    abstract: str = ""  # may be empty if unavailable
+    url: str  # canonical arXiv abs URL
+    arxiv_id: str | None = None  # e.g. "2312.01234"
+    published: str | None = None  # ISO 8601 date
+    relevance_reason: str | None = None  # LLM-assigned, why it matters here
+
+
+class SearchFindings(BaseModel):
+    """Searcher agent output: curated papers + synthesized key findings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    queries: list[str] = Field(default_factory=list, max_length=10)
+    papers: list[Paper] = Field(default_factory=list, max_length=15)
+    key_findings: list[str] = Field(default_factory=list, max_length=10)
+    # short synthesized bullets for Writer
+    datasets_mentioned: list[str] = Field(default_factory=list, max_length=10)
+
+
 class RunResult(BaseModel):
     """Terminal result for one run. Stub for M1."""
 

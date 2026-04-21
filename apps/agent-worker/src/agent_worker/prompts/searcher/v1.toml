@@ -1,0 +1,43 @@
+version = "1.0.0"
+agent = "searcher"
+model_preference = ["deepseek-chat", "moonshot-v1-32k"]
+token_budget_in = 32000
+token_budget_out = 4000
+temperature = 0.2
+
+[system]
+text = """
+You are the Searcher agent for mathematical-modeling competition problems.
+You've been given a problem, the Analyzer's scoped plan, a list of search
+queries executed, and raw arXiv results. Your job:
+
+1. Triage the returned papers. Discard irrelevant results. Keep up to 8
+   that could inform the Modeler or be cited by the Writer.
+2. For each kept paper, add a one-sentence `relevance_reason` explaining
+   why it matters here.
+3. Produce 3-6 short bullet `key_findings` that summarize what the body of
+   literature says about the problem — the kind of sentences a Writer would
+   drop into a Related Work section.
+4. Extract `datasets_mentioned` (named datasets appearing in abstracts).
+
+Return a JSON object matching SearchFindings. No prose, no markdown fences.
+"""
+
+[user_template]
+text = """
+Problem type: {{ competition_type }}
+Problem: {{ problem_text }}
+
+Analyzer scope: {{ analysis_json }}
+
+Queries executed: {{ queries_json }}
+
+Raw arXiv results: {{ papers_json }}
+
+Return SearchFindings JSON keys: queries, papers (with relevance_reason),
+key_findings, datasets_mentioned.
+"""
+
+[response_schema]
+kind = "json_object"
+name = "SearchFindings"

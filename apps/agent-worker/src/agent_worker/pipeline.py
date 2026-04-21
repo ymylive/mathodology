@@ -1,4 +1,4 @@
-"""M6 pipeline: Analyzer → Modeler → Coder → Writer.
+"""Pipeline: Analyzer → Searcher → Modeler → Coder → Writer (M10, 5 agents).
 
 The `done` event carries both `notebook_path` and `paper_path` so the
 gateway's audit task can persist them and the UI can offer downloads.
@@ -7,6 +7,12 @@ M9 adds the HMML knowledge base: the Modeler consults a BM25-indexed library
 of ~30 canonical modeling methods before producing its ModelSpec. The service
 is loaded lazily once per process; if the seed dir is missing or empty the
 Modeler transparently falls back to its pre-M9 behavior.
+
+M10 inserts the Searcher between Analyzer and Modeler: it derives queries from
+the Analyzer output, hits arXiv for prior work, and passes curated findings to
+the Writer for Related Work / References. The Modeler is NOT affected (HMML
+remains its only external context). If arXiv is unreachable the Searcher
+degrades to an empty SearchFindings and the pipeline continues.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from agent_worker.agents import (
     AnalyzerAgent,
     CoderAgent,
     ModelerAgent,
+    SearcherAgent,
     WriterAgent,
 )
 from agent_worker.config import get_settings
@@ -66,6 +73,9 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             analyzer = AnalyzerAgent(gateway, emitter)
             analysis = await analyzer.run_for_problem(problem)
 
+            searcher = SearcherAgent(gateway, emitter)
+            findings = await searcher.run_for(problem, analysis)
+
             modeler = ModelerAgent(gateway, emitter, hmml=hmml)
             spec = await modeler.run_for(problem, analysis)
 
@@ -73,7 +83,9 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             coder_out = await coder.run(problem, analysis, spec)
 
             writer = WriterAgent(gateway, emitter)
-            paper = await writer.run_for(problem, analysis, spec, coder_out)
+            paper = await writer.run_for(
+                problem, analysis, spec, coder_out, findings
+            )
 
             # Write paper.md to disk.
             paper_path = run_dir / "paper.md"

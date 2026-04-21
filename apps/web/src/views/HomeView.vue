@@ -7,6 +7,7 @@ import AgentOutputCard from "@/components/AgentOutputCard.vue";
 import CostMeter from "@/components/CostMeter.vue";
 import KernelActivityPanel from "@/components/KernelActivityPanel.vue";
 import PaperDraftView from "@/components/PaperDraftView.vue";
+import SearchFindingsView from "@/components/SearchFindingsView.vue";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -65,11 +66,11 @@ const feedEvents = computed(() =>
 // usage. Sorted by a stable agent-order for predictable layout.
 const AGENT_ORDER = [
   "analyzer",
+  "searcher",
   "modeler",
   "coder",
   "writer",
   "critic",
-  "searcher",
 ];
 
 const streamAgents = computed(() => {
@@ -119,6 +120,17 @@ const writerPaper = computed(() => {
   if (!writer) return null;
   if (writer.schemaName !== "PaperDraft") return null;
   return writer;
+});
+
+// Searcher's SearchFindings can easily emit 10+ papers; in the 2-col grid
+// that renders as a cramped scrolling list. Promote it to a full-width row
+// below (mirroring the Writer treatment) and swap the in-column output for
+// a short "see findings below" hint.
+const searcherFindings = computed(() => {
+  const searcher = store.outputs["searcher"];
+  if (!searcher) return null;
+  if (searcher.schemaName !== "SearchFindings") return null;
+  return searcher;
 });
 </script>
 
@@ -285,6 +297,15 @@ const writerPaper = computed(() => {
               <ArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
               <span>Paper rendered below</span>
             </div>
+            <!-- Searcher + SearchFindings: same full-width treatment as
+                 Writer — a hit list with ~10 papers reads much better wide. -->
+            <div
+              v-else-if="agent === 'searcher' && searcherFindings"
+              class="rounded-md border border-sky-900/60 bg-sky-950/20 px-3 py-2 text-xs text-sky-300 mono inline-flex items-center gap-1.5"
+            >
+              <ArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Search findings rendered below</span>
+            </div>
             <AgentOutputCard
               v-else-if="store.outputs[agent]"
               :agent="agent"
@@ -295,6 +316,49 @@ const writerPaper = computed(() => {
           </div>
         </section>
       </div>
+
+      <!-- Full-width search findings card: rendered above the paper (and
+           below the 2-col grid) because Searcher runs before Writer in the
+           pipeline, so keeping the visual order matches the event timeline. -->
+      <Card
+        v-if="searcherFindings"
+        class="overflow-hidden border-sky-900/60 bg-sky-950/10"
+        aria-label="Search findings"
+      >
+        <header
+          class="px-4 py-2 border-b border-sky-900/60 flex items-center gap-2"
+        >
+          <span
+            class="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+            style="background-color: var(--color-agent-searcher)"
+            aria-hidden="true"
+          />
+          <span class="text-sm text-foreground">Search findings</span>
+          <Badge
+            variant="outline"
+            class="mono text-[11px] py-0 px-1.5 font-normal border-sky-900 bg-sky-950/60 text-sky-300"
+          >
+            SearchFindings
+          </Badge>
+          <Badge
+            v-if="searcherFindings.durationMs !== null"
+            variant="outline"
+            class="mono text-[11px] py-0 px-1.5 font-normal text-muted-foreground tabular-nums"
+          >
+            {{
+              searcherFindings.durationMs < 1000
+                ? `${searcherFindings.durationMs} ms`
+                : `${(searcherFindings.durationMs / 1000).toFixed(1)} s`
+            }}
+          </Badge>
+        </header>
+        <div class="px-4 py-4">
+          <SearchFindingsView
+            :output="searcherFindings.output"
+            :run-id="store.runId ?? ''"
+          />
+        </div>
+      </Card>
 
       <!-- Full-width paper card: Writer's PaperDraft is the main deliverable
            so it breaks out of the 2-column flow and spans the full page. -->

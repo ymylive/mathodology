@@ -20,12 +20,14 @@ dependencies = [
   "scipy>=1.13",
   "scikit-learn>=1.5",
   "rank-bm25>=0.2.2",
+  "defusedxml>=0.7",
 ]
 
 [dependency-groups]
 dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
+  "pytest-httpx>=0.30",
 ]
 
 [project.scripts]

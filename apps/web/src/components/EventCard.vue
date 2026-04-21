@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Dot,
+  FileSearch,
   Image as ImageIcon,
   Library,
   Play,
@@ -45,6 +46,19 @@ const hmmlRetrieved = computed<string | null>(() => {
   if (typeof p.message !== "string") return null;
   const m = HMML_RETRIEVED_RE.exec(p.message);
   return m ? m[1].trim() : null;
+});
+
+// M10: Searcher emits two distinctive logs — "arXiv queries: [...]" before
+// fetching and "arXiv returned N unique papers across M queries" after.
+// Both get a teal-tinted pill with a FileSearch icon so Searcher's stage
+// boundary reads at a glance without cracking open the JSON payload.
+const ARXIV_LOG_RE = /^arXiv (?:queries|returned)\b/;
+
+const arxivLogMessage = computed<string | null>(() => {
+  if (props.event.kind !== "log") return null;
+  const p = props.event.payload as { message?: unknown };
+  if (typeof p.message !== "string") return null;
+  return ARXIV_LOG_RE.test(p.message) ? p.message : null;
 });
 
 const figureInfo = computed<{ path: string; src: string } | null>(() => {
@@ -241,6 +255,23 @@ const truncatedSummary = computed(() => {
           class="text-sm text-foreground break-words min-w-0 whitespace-pre-wrap"
         >
           {{ hmmlRetrieved }}
+        </span>
+      </template>
+
+      <!-- arXiv search log: teal pill + the raw message so query lists or
+           paper counts stay readable without truncation. -->
+      <template v-else-if="arxivLogMessage !== null">
+        <Badge
+          variant="outline"
+          class="mono text-[11px] py-0 px-1.5 font-normal gap-1 border-teal-900 bg-teal-950/60 text-teal-300"
+        >
+          <FileSearch class="h-3 w-3" aria-hidden="true" />
+          <span>arXiv</span>
+        </Badge>
+        <span
+          class="text-sm text-foreground break-words min-w-0 whitespace-pre-wrap"
+        >
+          {{ arxivLogMessage }}
         </span>
       </template>
 

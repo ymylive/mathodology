@@ -13,6 +13,7 @@ from mm_contracts import (
     ModelSpec,
     PaperDraft,
     ProblemInput,
+    SearchFindings,
 )
 
 from agent_worker.agents.base import BaseAgent
@@ -30,8 +31,15 @@ class WriterAgent(BaseAgent):
         analysis: AnalyzerOutput,
         spec: ModelSpec,
         coder_output: CoderOutput,
+        findings: SearchFindings | None = None,
     ) -> PaperDraft:
         """Render the Writer template from all upstream artifacts and call the LLM."""
+        # Fallback so existing callers / tests that don't pass findings still work.
+        findings_payload = (
+            findings.model_dump(mode="json")
+            if findings is not None
+            else {"queries": [], "papers": [], "key_findings": [], "datasets_mentioned": []}
+        )
         output = await self.run(
             problem_text=problem.problem_text,
             competition_type=problem.competition_type,
@@ -54,6 +62,9 @@ class WriterAgent(BaseAgent):
                 ],
                 ensure_ascii=False,
                 indent=2,
+            ),
+            findings_json=json.dumps(
+                findings_payload, ensure_ascii=False, indent=2
             ),
         )
         assert isinstance(output, PaperDraft)

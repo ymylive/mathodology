@@ -9,7 +9,7 @@
     "baseline centrality measure for directed networks"
   ],
   "math_form": "r = \\alpha M r + (1-\\alpha)/N \\cdot \\mathbf{1}",
-  "python_template": "import numpy as np\n\ndef pagerank(A, alpha=0.85, tol=1e-8, max_iter=200):\n    # A: adjacency matrix, rows = outlinks. Dangling rows handled via teleport.\n    A = np.asarray(A, dtype=float)\n    n = A.shape[0]\n    out = A.sum(axis=1, keepdims=True)\n    out[out == 0] = 1.0\n    M = (A / out).T\n    r = np.ones(n) / n\n    teleport = (1 - alpha) / n\n    for _ in range(max_iter):\n        rn = alpha * (M @ r) + teleport\n        if np.linalg.norm(rn - r, 1) < tol:\n            return rn\n        r = rn\n    return r",
+  "python_template": "import numpy as np\n\ndef pagerank(A, alpha=0.85, tol=1e-8, max_iter=200):\n    # A: adjacency matrix, rows = outlinks.\n    # Dangling rows (no outlinks) are replaced with uniform 1/n so their mass\n    # teleports evenly across all nodes instead of being dropped.\n    A = np.asarray(A, dtype=float).copy()\n    n = A.shape[0]\n    out = A.sum(axis=1)\n    dangling = out == 0\n    if dangling.any():\n        A[dangling] = 1.0 / n\n        out = A.sum(axis=1)\n    M = (A / out[:, None]).T  # column-stochastic\n    r = np.ones(n) / n\n    teleport = (1 - alpha) / n\n    for _ in range(max_iter):\n        rn = alpha * (M @ r) + teleport\n        if np.linalg.norm(rn - r, 1) < tol:\n            return rn\n        r = rn\n    return r",
   "typical_cases": [
     "ranking academic papers in a citation network",
     "importance of users in a follower / retweet graph",

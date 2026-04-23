@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mathodology · Promo</title>
+
+<!-- Preconnect before linking so Chromium pipelines DNS + TLS immediately.
+     Fonts ready is explicitly awaited inside Stage (animations.jsx). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --ivory: #FAF9F5;      /* warm paper background */
+    --ivory-warm: #F3EFE3;
+    --ink: #1C1B18;        /* near-black with brown temperature */
+    --ink-soft: #3A3833;
+    --rule: #D8D3C3;
+    --muted: #6F6C66;
+    --accent: #D9E838;     /* neon yellow-green */
+    --accent-dim: rgba(217, 232, 56, 0.18);
+    --serif: 'EB Garamond', 'Source Serif Pro', Georgia, serif;
+    --sans: 'Inter', -apple-system, system-ui, sans-serif;
+    --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  }
+  html, body {
+    margin: 0; padding: 0; background: var(--ivory);
+    font-family: var(--sans); color: var(--ink);
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  }
+  /* render-video.js drops window.__recording = true via addInitScript BEFORE
+     the page script runs. We hide animations.jsx Stage's built-in controls
+     (position:fixed bottom bar + backdrop-filter) when recording so the
+     exported MP4/GIF is pure canvas, no play/pause chrome. */
+  body.recording div[style*="backdrop-filter"][style*="position: fixed"] { display: none !important; }
+  /* belt-and-suspenders: hide any position:fixed bottom chrome */
+  body.recording div[style*="position: fixed"][style*="bottom: 0"] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script>
+  // If render-video's addInitScript set window.__recording before this HTML
+  // parsed, promote it to a body class so our CSS above can match. This runs
+  // synchronously at parse time.
+  if (typeof window !== 'undefined' && window.__recording) {
+    document.documentElement.classList.add('recording');
+    document.addEventListener('DOMContentLoaded', () => document.body.classList.add('recording'));
+    // fallback in case DOMContentLoaded already fired
+    if (document.body) document.body.classList.add('recording');
+  }
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+
+<script type="text/babel" data-type="module">
+// ═══════════════════════════════════════════════════════════════════
+//  animations.jsx — inlined (prevents file:// CORS on double-click open).
+//  Source: ~/.claude/skills/huashu-design/assets/animations.jsx
+// ═══════════════════════════════════════════════════════════════════
+(function() {
+  const { createContext, useContext, useState, useEffect, useRef, useCallback } = React;
+  const TimeContext = createContext({ time: 0, duration: 10, playing: false });
+  const SpriteContext = createContext(null);
+
+  const Easing = {
+    linear: t => t,
+    easeIn: t => t * t,
+    easeOut: t => 1 - (1 - t) * (1 - t),
+    easeInOut: t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
+    expoOut: t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t),
+    overshoot: t => {
+      const c1 = 1.70158, c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    },
+    spring: t => {
+      const c = (2 * Math.PI) / 3;
+      return t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c) + 1;
+    },
+  };
+
+  function interpolate(t, input, output, easing) {
+    const [inStart, inEnd] = input;
+    const [outStart, outEnd] = output;
+    if (t <= inStart) return outStart;
+    if (t >= inEnd) return outEnd;
+    let progress = (t - inStart) / (inEnd - inStart);
+    if (easing) progress = easing(progress);
+    return outStart + (outEnd - outStart) * progress;
+  }
+
+  function useTime() { return useContext(TimeContext).time; }
+  function useSprite() {
+    const sprite = useContext(SpriteContext);
+    return sprite || { t: 0, elapsed: 0, duration: 0 };
+  }
+
+  function Stage({ duration = 10, width = 1280, height = 720, loop = true, children, bgColor = '#FAF9F5' }) {
+    const [time, setTime] = useState(0);
+    // Recording mode: start paused and wait for render-video.js to call
+    // window.__seek(0) — that's the handshake that kicks the clock off. This
+    // avoids the race where the Playwright observer sees __ready seconds
+    // after Stage's first rAF already advanced time past Scene 1.
+    const startPlaying = !(typeof window !== 'undefined' && window.__recording);
+    const [playing, setPlaying] = useState(startPlaying);
+    const [scale, setScale] = useState(1);
+    const rafRef = useRef(null);
+    const effectiveLoop = (typeof window !== 'undefined' && window.__recording) ? false : loop;
+
+    // Expose __seek for render-video.js second-line defense (see
+    // animation-pitfalls.md §12). When the recorder calls window.__seek(0),
+    // we reset the clock AND kickstart playback (recording mode starts paused).
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      window.__seek = (t) => {
+        setTime(Math.max(0, Math.min(duration, t)));
+        setPlaying(true);
+      };
+    }, [duration]);
+
+    useEffect(() => {
+      function updateScale() {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        setScale(Math.min(vw / width, vh / height));
+      }
+      updateScale();
+      window.addEventListener('resize', updateScale);
+      return () => window.removeEventListener('resize', updateScale);
+    }, [width, height]);
+
+    // __ready: announced as soon as Stage is mounted, layout committed, and
+    // fonts loaded — INDEPENDENT of whether the clock is running. This lets
+    // render-video observe readiness and call __seek(0) to kick off the clock.
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      const announce = () => { window.__ready = true; };
+      if (document.fonts?.ready) document.fonts.ready.then(() => requestAnimationFrame(announce));
+      else requestAnimationFrame(announce);
+    }, []);
+
+    useEffect(() => {
+      if (!playing) return;
+      let cancelled = false;
+      let last = null;
+      function tick(now) {
+        if (cancelled) return;
+        if (last === null) { last = now; }
+        const delta = (now - last) / 1000;
+        last = now;
+        setTime(prev => {
+          const next = prev + delta;
+          if (next >= duration) return effectiveLoop ? 0 : duration - 0.001;
+          return next;
+        });
+        rafRef.current = requestAnimationFrame(tick);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+      return () => { cancelled = true; cancelAnimationFrame(rafRef.current); };
+    }, [playing, duration, effectiveLoop]);
+
+    const canvasStyle = {
+      position: 'absolute', top: '50%', left: '50%',
+      width, height, background: bgColor, overflow: 'hidden',
+      transformOrigin: 'center center',
+      transform: `translate(-50%, -50%) scale(${scale})`,
+    };
+
+    return (
+      <TimeContext.Provider value={{ time, duration, playing, setPlaying, setTime }}>
+        <div style={{ position: 'fixed', inset: 0, background: '#000' }}>
+          <div style={canvasStyle}>{children}</div>
+        </div>
+      </TimeContext.Provider>
+    );
+  }
+
+  function Sprite({ start = 0, end, children, style }) {
+    const { time } = useContext(TimeContext);
+    const actualEnd = end == null ? Infinity : end;
+    if (time < start || time >= actualEnd) return null;
+    const dur = actualEnd - start;
+    const elapsed = time - start;
+    const t = dur === 0 ? 1 : Math.max(0, Math.min(1, elapsed / dur));
+    return (
+      <SpriteContext.Provider value={{ t, elapsed, duration: dur, start, end: actualEnd }}>
+        <div style={{ position: 'absolute', inset: 0, ...style }}>{children}</div>
+      </SpriteContext.Provider>
+    );
+  }
+
+  window.Animations = { Stage, Sprite, useTime, useSprite, Easing, interpolate };
+})();
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  Mathodology promo · 5 scenes · 24s total
+// ═══════════════════════════════════════════════════════════════════
+const { Stage, Sprite, useSprite, useTime, Easing, interpolate } = window.Animations;
+const { useMemo } = React;
+
+// Timeline boundaries (seconds) — change one place, everyone stays in sync.
+const T = {
+  HERO_IN:   0.0,  HERO_OUT:   3.2,
+  PROMPT_IN: 3.0,  PROMPT_OUT: 7.5,
+  PIPE_IN:   7.3,  PIPE_OUT:  16.0,
+  BOOM_IN:  15.8,  BOOM_OUT:  21.5,
+  OUTRO_IN: 21.3,  OUTRO_OUT: 24.0,
+  TOTAL:    24.0,
+};
+
+// ───────── S1 · Hero ─────────
+function Hero() {
+  const { t } = useSprite();
+  const title = 'Mathodology';
+  const chars = useMemo(() => title.split(''), []);
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: 28, padding: 60,
+    }}>
+      {/* version strip top-left */}
+      <div style={{
+        position: 'absolute', top: 48, left: 72,
+        fontFamily: 'var(--mono)', fontSize: 11,
+        letterSpacing: '0.24em', textTransform: 'uppercase',
+        color: 'var(--muted)',
+        opacity: interpolate(t, [0, 0.3], [0, 1], Easing.expoOut),
+      }}>
+        MathModelAgent-Pro&nbsp;&nbsp;·&nbsp;&nbsp;v0.3.0
+      </div>
+
+      {/* big serif title, per-char stagger */}
+      <div style={{
+        fontFamily: 'var(--serif)', fontWeight: 500,
+        fontSize: 168, lineHeight: 0.95, letterSpacing: '-0.02em',
+        color: 'var(--ink)', whiteSpace: 'nowrap',
+      }}>
+        {chars.map((ch, i) => {
+          const start = 0.08 + i * 0.035;
+          const localT = Math.max(0, Math.min(1, (t - start) / 0.45));
+          const eased = Easing.expoOut(localT);
+          return (
+            <span key={i} style={{
+              display: 'inline-block',
+              opacity: eased,
+              transform: `translateY(${(1 - eased) * 34}px)`,
+            }}>{ch === ' ' ? ' ' : ch}</span>
+          );
+        })}
+      </div>
+
+      {/* italic tagline — serif + highlight phrase */}
+      <div style={{
+        fontFamily: 'var(--serif)', fontStyle: 'italic',
+        fontSize: 32, lineHeight: 1.25, color: 'var(--ink-soft)',
+        opacity: interpolate(t, [0.55, 0.85], [0, 1], Easing.expoOut),
+        transform: `translateY(${interpolate(t, [0.55, 0.85], [12, 0], Easing.expoOut)}px)`,
+      }}>
+        A mathematical answer in{' '}
+        <span style={{
+          background: 'linear-gradient(transparent 62%, var(--accent) 62%, var(--accent) 94%, transparent 94%)',
+          padding: '0 6px',
+        }}>30 minutes</span>.
+      </div>
+
+      {/* bottom eyebrow — mono meta */}
+      <div style={{
+        position: 'absolute', bottom: 48, left: 72, right: 72,
+        display: 'flex', justifyContent: 'space-between',
+        fontFamily: 'var(--mono)', fontSize: 12,
+        letterSpacing: '0.18em', color: 'var(--muted)',
+        textTransform: 'uppercase',
+        opacity: interpolate(t, [0.75, 0.95], [0, 1]),
+      }}>
+        <span>MCM · ICM · CUMCM · 华数杯</span>
+        <span>5-agent pipeline</span>
+      </div>
+    </div>
+  );
+}
+
+// ───────── S2 · Prompt ─────────
+function Prompt() {
+  const { t } = useSprite();
+
+  // chunk reveal — split by word + punctuation so "tokens" come in as chunks,
+  // not char-by-char. Unevenness is intentional.
+  const text = '某城市公交公司有一条长 12 公里的线路，共 8 个站点。\n早高峰 7:00-9:00 各站到达率 λ = [2.1, 3.4, 5.8, 7.2, 6.5, 4.9, 3.1, 1.8]。\n车辆容量 80 人，平均速度 25 km/h。\n\n请建立数学模型：\n(1) 估计 6 分钟发车间隔下各站平均候车时间；\n(2) 优化发车间隔使各站候车 ≤ 3 分钟；\n(3) 对关键参数做灵敏度分析。';
+
+  // Reveal schedule: text finishes streaming by t=0.85 of this sprite.
+  const chunks = useMemo(() => text.split(/(\s+|，|。|：|；)/).filter(Boolean), []);
+  const revealCount = Math.floor(interpolate(t, [0.05, 0.82], [0, chunks.length], Easing.easeOut));
+  const shownText = chunks.slice(0, revealCount).join('');
+
+  // Right-side field labels
+  const fields = [
+    { k: 'competition_type', v: 'cumcm',   start: 0.15 },
+    { k: 'model',            v: 'gpt-5.4', start: 0.30 },
+    { k: 'reasoning_effort', v: 'low',     start: 0.45 },
+    { k: 'long_context',     v: 'false',   start: 0.55 },
+  ];
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      padding: '80px 88px',
+      display: 'grid', gridTemplateColumns: '1fr 360px', gap: 64,
+    }}>
+      {/* Section label */}
+      <div style={{
+        gridColumn: '1 / -1',
+        fontFamily: 'var(--mono)', fontSize: 11,
+        letterSpacing: '0.28em', textTransform: 'uppercase',
+        color: 'var(--muted)',
+        opacity: interpolate(t, [0, 0.15], [0, 1]),
+      }}>
+        01 · Problem input
+      </div>
+
+      {/* Mono code-block */}
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 20, lineHeight: 1.65,
+        color: 'var(--ink)',
+        borderLeft: '2px solid var(--accent)',
+        paddingLeft: 28,
+        whiteSpace: 'pre-wrap',
+        minHeight: 380,
+        opacity: interpolate(t, [0, 0.1], [0, 1]),
+      }}>
+        {shownText}
+        <span style={{
+          display: 'inline-block', width: 10, height: 22,
+          background: 'var(--ink)', marginLeft: 2,
+          verticalAlign: '-4px',
+          opacity: (Math.floor(t * 6) % 2 === 0) ? 1 : 0,
+        }} />
+      </div>
+
+      {/* Side fields */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingTop: 8 }}>
+        {fields.map((f, i) => {
+          const localT = interpolate(t, [f.start, f.start + 0.2], [0, 1], Easing.expoOut);
+          return (
+            <div key={f.k} style={{
+              opacity: localT,
+              transform: `translateX(${(1 - localT) * 24}px)`,
+              display: 'flex', flexDirection: 'column', gap: 6,
+              borderBottom: '1px solid var(--rule)', paddingBottom: 16,
+            }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 11,
+                letterSpacing: '0.18em', textTransform: 'uppercase',
+                color: 'var(--muted)',
+              }}>{f.k}</div>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 22, fontWeight: 500,
+                color: 'var(--ink)',
+              }}>{f.v}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ───────── S3 · Pipeline ─────────
+const AGENTS = [
+  { id: 'analyzer', name: 'Analyzer', out: [{ k: 'sub_questions', v: '12' }, { k: 'approaches',    v: '5'  }] },
+  { id: 'searcher', name: 'Searcher', out: [{ k: 'arXiv',         v: '5'  }, { k: 'Baidu + CSDN',  v: '5'  }] },
+  { id: 'modeler',  name: 'Modeler',  out: [{ k: 'variables',     v: '28' }, { k: 'equations',     v: '18' }] },
+  { id: 'coder',    name: 'Coder',    out: [{ k: 'notebook cells',v: '7'  }, { k: 'figures',       v: '5'  }] },
+  { id: 'writer',   name: 'Writer',   out: [{ k: 'sections',      v: '12' }, { k: 'references',    v: '16' }] },
+];
+
+function Pipeline() {
+  const { t } = useSprite();
+  const N = AGENTS.length;
+  // agent i becomes "active" during [0.1 + 0.16*i, 0.1 + 0.16*i + 0.2]
+  // and stays "lit" after that until end.
+  const agentState = (i) => {
+    const activate = 0.08 + 0.16 * i;
+    const litStart = Math.max(0, Math.min(1, (t - activate) / 0.18));
+    return { lit: litStart, active: litStart > 0 };
+  };
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      padding: '80px 96px',
+      display: 'flex', flexDirection: 'column', gap: 64,
+    }}>
+      {/* Section label */}
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 11,
+        letterSpacing: '0.28em', textTransform: 'uppercase',
+        color: 'var(--muted)',
+      }}>
+        02 · Pipeline
+      </div>
+
+      {/* Horizontal agent rail */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: `repeat(${N}, 1fr)`,
+        columnGap: 0, position: 'relative',
+      }}>
+        {/* connecting dashed rule behind nodes */}
+        <div style={{
+          position: 'absolute', top: 17, left: `${50 / N}%`, right: `${50 / N}%`,
+          height: 1,
+          backgroundImage: 'linear-gradient(90deg, var(--rule) 50%, transparent 50%)',
+          backgroundSize: '10px 1px',
+        }} />
+        {/* progress fill — accent color sweeps left→right with animation */}
+        <div style={{
+          position: 'absolute', top: 16, left: `${50 / N}%`,
+          width: `${interpolate(t, [0.08, 0.92], [0, (N - 1) * 100 / N], Easing.easeInOut)}%`,
+          height: 3, background: 'var(--accent)',
+          transition: 'width 0.3s',
+        }} />
+
+        {AGENTS.map((a, i) => {
+          const s = agentState(i);
+          const isCurrent = s.lit > 0 && s.lit < 1;
+          return (
+            <div key={a.id} style={{
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: 18,
+              position: 'relative',
+            }}>
+              {/* Node dot */}
+              <div style={{
+                width: 36, height: 36, borderRadius: '50%',
+                border: `2px solid ${s.active ? 'var(--ink)' : 'var(--rule)'}`,
+                background: s.lit >= 1 ? 'var(--accent)' : 'var(--ivory)',
+                transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transform: `scale(${isCurrent ? 1 + 0.18 * Math.sin(s.lit * Math.PI) : 1})`,
+                zIndex: 2,
+              }}>
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                  color: s.lit >= 1 ? 'var(--ink)' : 'var(--muted)',
+                }}>{i + 1}</span>
+              </div>
+              {/* Name */}
+              <div style={{
+                fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500,
+                color: s.active ? 'var(--ink)' : 'var(--muted)',
+                opacity: interpolate(s.lit, [0, 0.5], [0.4, 1]),
+              }}>{a.name}</div>
+              {/* Output card */}
+              <div style={{
+                marginTop: 8,
+                padding: '14px 18px',
+                width: 160,
+                background: s.lit >= 0.6 ? 'var(--ivory-warm)' : 'transparent',
+                border: `1px solid ${s.lit >= 0.6 ? 'var(--rule)' : 'transparent'}`,
+                display: 'flex', flexDirection: 'column', gap: 8,
+                opacity: interpolate(s.lit, [0.3, 0.9], [0, 1], Easing.expoOut),
+                transform: `translateY(${interpolate(s.lit, [0.3, 0.9], [12, 0], Easing.expoOut)}px)`,
+              }}>
+                {a.out.map((o, oi) => (
+                  <div key={oi} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                    fontFamily: 'var(--mono)', fontSize: 12,
+                    color: 'var(--ink-soft)', letterSpacing: '0.02em',
+                  }}>
+                    <span style={{ opacity: 0.7 }}>{o.k}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{o.v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Running total strip */}
+      <div style={{
+        marginTop: 'auto',
+        display: 'flex', gap: 64, alignItems: 'baseline',
+        fontFamily: 'var(--mono)', fontSize: 14,
+        color: 'var(--muted)', letterSpacing: '0.08em',
+        opacity: interpolate(t, [0.55, 0.8], [0, 1]),
+      }}>
+        <span>ELAPSED&nbsp;&nbsp;<span style={{ color: 'var(--ink)', fontWeight: 600 }}>{
+          Math.floor(interpolate(t, [0, 1], [0, 28])).toString().padStart(2, '0')
+        }:{(Math.floor(interpolate(t, [0, 1], [0, 28]) * 60) % 60).toString().padStart(2, '0')}</span></span>
+        <span>COST&nbsp;&nbsp;<span style={{ color: 'var(--ink)', fontWeight: 600 }}>¥{
+          interpolate(t, [0, 1], [0, 2.22]).toFixed(2)
+        }</span></span>
+        <span>STATUS&nbsp;&nbsp;<span style={{ color: t >= 0.88 ? 'var(--ink)' : 'var(--muted)', fontWeight: 600 }}>
+          {t >= 0.88 ? 'DONE' : 'RUNNING'}
+        </span></span>
+      </div>
+    </div>
+  );
+}
+
+// ───────── S4 · Boom · paper reveal ─────────
+function PaperBoom() {
+  const { t } = useSprite();
+  // Dolly: cards start high + rotated, fall into place with expoOut
+  // Timings: primary page lands at 0.25, two supporting pages at 0.40 and 0.55
+
+  // Anticipation: 0.5s pause before cards fall
+  const primaryIn = Math.max(0, Math.min(1, (t - 0.08) / 0.45));
+  const sideIn1   = Math.max(0, Math.min(1, (t - 0.30) / 0.45));
+  const sideIn2   = Math.max(0, Math.min(1, (t - 0.42) / 0.45));
+  const statsIn   = Math.max(0, Math.min(1, (t - 0.60) / 0.35));
+  const eP = Easing.expoOut(primaryIn);
+  const eS1 = Easing.expoOut(sideIn1);
+  const eS2 = Easing.expoOut(sideIn2);
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      padding: '60px 96px',
+      display: 'grid', gridTemplateColumns: '420px 1fr', gap: 64,
+      perspective: '2400px', perspectiveOrigin: '50% 30%',
+    }}>
+      {/* Section label — top */}
+      <div style={{
+        position: 'absolute', top: 48, left: 96,
+        fontFamily: 'var(--mono)', fontSize: 11,
+        letterSpacing: '0.28em', textTransform: 'uppercase',
+        color: 'var(--muted)',
+      }}>
+        03 · Paper
+      </div>
+
+      {/* Primary PDF — center-left, tilts up slightly */}
+      <div style={{
+        marginTop: 72,
+        transformStyle: 'preserve-3d',
+        transform: `
+          rotateX(${interpolate(eP, [0, 1], [18, 8], Easing.linear)}deg)
+          rotateY(${interpolate(eP, [0, 1], [-14, -4], Easing.linear)}deg)
+          translateY(${(1 - eP) * -60}px)
+        `,
+        opacity: eP,
+      }}>
+        <PdfPage variant="cover" />
+      </div>
+
+      {/* Right column — stats + 2 supporting pages */}
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 36, marginTop: 72 }}>
+        {/* Stats */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 36,
+          opacity: statsIn,
+        }}>
+          {[
+            { n: '15',   u: 'pages' },
+            { n: '5',    u: 'figures' },
+            { n: '16',   u: 'refs' },
+            { n: '¥2.22', u: 'cost' },
+          ].map((s, i) => {
+            const localT = Math.max(0, Math.min(1, (statsIn - i * 0.08) / 0.4));
+            return (
+              <div key={i} style={{
+                display: 'flex', flexDirection: 'column', gap: 6,
+                opacity: localT,
+                transform: `translateY(${(1 - localT) * 12}px)`,
+              }}>
+                <div style={{
+                  fontFamily: 'var(--serif)', fontSize: 56, lineHeight: 1,
+                  color: 'var(--ink)', fontWeight: 500,
+                  letterSpacing: '-0.02em',
+                }}>{s.n}</div>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 11,
+                  letterSpacing: '0.24em', textTransform: 'uppercase',
+                  color: 'var(--muted)',
+                }}>{s.u}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Two supporting pages — tornado + residual preview */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24,
+          transformStyle: 'preserve-3d',
+        }}>
+          <div style={{
+            transform: `
+              rotateX(${interpolate(eS1, [0, 1], [14, 6], Easing.linear)}deg)
+              rotateY(${interpolate(eS1, [0, 1], [10, 4], Easing.linear)}deg)
+              translateY(${(1 - eS1) * -40}px)
+            `,
+            opacity: eS1,
+          }}>
+            <PdfPage variant="figure-tornado" />
+          </div>
+          <div style={{
+            transform: `
+              rotateX(${interpolate(eS2, [0, 1], [14, 6], Easing.linear)}deg)
+              rotateY(${interpolate(eS2, [0, 1], [10, 4], Easing.linear)}deg)
+              translateY(${(1 - eS2) * -40}px)
+            `,
+            opacity: eS2,
+          }}>
+            <PdfPage variant="figure-heatmap" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PdfPage({ variant }) {
+  const shared = {
+    background: '#FCFBF7',
+    border: '1px solid var(--rule)',
+    boxShadow: '0 24px 48px -20px rgba(28, 27, 24, 0.25), 0 6px 12px -6px rgba(28, 27, 24, 0.18)',
+    fontFamily: 'var(--serif)',
+    color: 'var(--ink)',
+    overflow: 'hidden',
+    position: 'relative',
+  };
+
+  if (variant === 'cover') {
+    return (
+      <div style={{ ...shared, width: 360, height: 480, padding: '36px 32px' }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.3em',
+          color: 'var(--muted)', textTransform: 'uppercase' }}>
+          CUMCM · 全国大学生数学建模竞赛
+        </div>
+        <div style={{ marginTop: 20, fontSize: 20, lineHeight: 1.25, fontWeight: 500,
+          color: 'var(--ink)' }}>
+          基于容量约束离散递推的<br/>城市公交高峰期发车间隔<br/>优化模型
+        </div>
+        <div style={{ marginTop: 18, height: 1, background: 'var(--rule)' }} />
+        <div style={{ marginTop: 18,
+          fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 11,
+          letterSpacing: '0.1em', color: 'var(--muted)' }}>摘　要</div>
+        <div style={{ marginTop: 10, fontFamily: 'var(--sans)', fontSize: 8.5, lineHeight: 1.6,
+          color: 'var(--ink-soft)' }}>
+          城市公交高峰调度的核心矛盾在于：乘客到达具有随机性，而运力供给以离散班次提供。
+          针对一条长 12 km、共 8 个站点的公交线路，我们建立了「泊松到达—批量服务—容量截断
+          —停站反馈」联合模型……
+        </div>
+        {/* Mock lines */}
+        <div style={{ position: 'absolute', left: 32, right: 32, bottom: 48,
+          display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {[0.95, 0.88, 0.92, 0.75, 0.82].map((w, i) => (
+            <div key={i} style={{ width: `${w * 100}%`, height: 3, background: 'var(--rule)' }} />
+          ))}
+        </div>
+        <div style={{ position: 'absolute', left: 32, right: 32, bottom: 22,
+          fontFamily: 'var(--mono)', fontSize: 7, letterSpacing: '0.25em',
+          color: 'var(--muted)', textTransform: 'uppercase',
+          display: 'flex', justifyContent: 'space-between' }}>
+          <span>Team&nbsp;#&nbsp;——————</span>
+          <span>Page&nbsp;1&nbsp;of&nbsp;15</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === 'figure-tornado') {
+    // Tornado: horizontal bars each split by 0 axis
+    const params = [
+      { label: 'α_λ (arrival)', l: -64, r: 72 },
+      { label: 'C (capacity)',  l: -48, r: 42 },
+      { label: 'v (speed)',     l: -28, r: 36 },
+      { label: 'τ (door)',      l: -18, r: 22 },
+      { label: 'β (dwell)',     l: -14, r: 16 },
+    ];
+    const maxAbs = 80;
+    return (
+      <div style={{ ...shared, height: 224, padding: 20 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 7, letterSpacing: '0.24em',
+          color: 'var(--muted)', textTransform: 'uppercase' }}>
+          Fig. 3 · Sensitivity Tornado
+        </div>
+        <div style={{ marginTop: 14, position: 'relative', height: 130 }}>
+          {/* center axis */}
+          <div style={{ position: 'absolute', top: 0, bottom: 14, left: '50%',
+            width: 1, background: 'var(--ink)' }} />
+          {params.map((p, i) => {
+            const y = 8 + i * 22;
+            const leftPct = Math.abs(p.l) / maxAbs * 40;
+            const rightPct = p.r / maxAbs * 40;
+            return (
+              <React.Fragment key={i}>
+                <div style={{ position: 'absolute', top: y, left: `calc(50% - ${leftPct}%)`,
+                  width: `${leftPct}%`, height: 14,
+                  background: 'var(--ink-soft)' }} />
+                <div style={{ position: 'absolute', top: y, left: '50%',
+                  width: `${rightPct}%`, height: 14,
+                  background: 'var(--accent)' }} />
+                <div style={{ position: 'absolute', top: y + 2, left: 4,
+                  fontFamily: 'var(--mono)', fontSize: 8,
+                  color: 'var(--muted)' }}>{p.label}</div>
+              </React.Fragment>
+            );
+          })}
+          {/* tick labels */}
+          <div style={{ position: 'absolute', bottom: 0, left: '50%',
+            transform: 'translateX(-50%)',
+            fontFamily: 'var(--mono)', fontSize: 7,
+            color: 'var(--muted)' }}>0</div>
+          <div style={{ position: 'absolute', bottom: 0, right: 12,
+            fontFamily: 'var(--mono)', fontSize: 7, color: 'var(--muted)' }}>+80%</div>
+          <div style={{ position: 'absolute', bottom: 0, left: 12,
+            fontFamily: 'var(--mono)', fontSize: 7, color: 'var(--muted)' }}>-80%</div>
+        </div>
+        <div style={{ marginTop: 8, fontFamily: 'var(--sans)', fontSize: 7.5,
+          color: 'var(--ink-soft)', lineHeight: 1.5 }}>
+          对统一最优班距 h=4.2 分钟为基准，±20% 扰动下最敏感参数为到达率缩放 α_λ。
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === 'figure-heatmap') {
+    // 8x6 heatmap cells
+    const cols = 8, rows = 6;
+    return (
+      <div style={{ ...shared, height: 224, padding: 20 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 7, letterSpacing: '0.24em',
+          color: 'var(--muted)', textTransform: 'uppercase' }}>
+          Fig. 4 · α_λ × C Heatmap
+        </div>
+        <div style={{ marginTop: 14, display: 'grid',
+          gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gridAutoRows: 16, gap: 1, padding: 1,
+          border: '1px solid var(--rule)' }}>
+          {Array.from({ length: rows * cols }, (_, i) => {
+            const r = Math.floor(i / cols), c = i % cols;
+            // radial gradient from center-right (high wait)
+            const dx = (c - 1) / cols, dy = (r - 4) / rows;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const v = Math.max(0, Math.min(1, dist));
+            // blend: low→ivory, high→ink
+            const bg = v > 0.6 ? `rgba(28,27,24,${0.3 + v * 0.7})`
+                      : v > 0.3 ? `rgba(217,232,56,${0.3 + v * 0.5})`
+                      : 'var(--ivory-warm)';
+            return <div key={i} style={{ background: bg }} />;
+          })}
+        </div>
+        <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between',
+          fontFamily: 'var(--mono)', fontSize: 7, color: 'var(--muted)' }}>
+          <span>C = 40</span>
+          <span>α_λ = 1.0</span>
+          <span>C = 120</span>
+        </div>
+        <div style={{ marginTop: 8, fontFamily: 'var(--sans)', fontSize: 7.5,
+          color: 'var(--ink-soft)', lineHeight: 1.5 }}>
+          固定班距 h=4.2 分钟，展示到达率与容量对最差站候车时间的联合影响。
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ───────── S5 · Outro — formats + wordmark ─────────
+function Outro() {
+  const { t } = useSprite();
+  const formats = [
+    { label: 'PDF',      size: '921 KB' },
+    { label: 'DOCX',     size: '629 KB' },
+    { label: 'LaTeX',    size: '36 KB'  },
+    { label: 'Markdown', size: '31 KB'  },
+  ];
+  // Phase: 0-0.55 stagger in, 0.55-0.75 hold, 0.75-1.0 collapse to wordmark
+  const collapseT = Math.max(0, Math.min(1, (t - 0.68) / 0.32));
+  const wordmarkT = Math.max(0, Math.min(1, (t - 0.78) / 0.22));
+  const wordmarkE = Easing.overshoot(wordmarkT);
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: 64, padding: 80,
+    }}>
+      {/* format buttons — fade during collapse */}
+      <div style={{
+        display: 'flex', gap: 16,
+        opacity: 1 - collapseT,
+        transform: `scale(${1 - 0.2 * collapseT}) translateY(${collapseT * -20}px)`,
+      }}>
+        {formats.map((f, i) => {
+          const start = 0.05 + i * 0.08;
+          const localT = Math.max(0, Math.min(1, (t - start) / 0.3));
+          const eased = Easing.overshoot(localT);
+          const isPrimary = i === 0;
+          return (
+            <div key={f.label} style={{
+              width: 160,
+              padding: '22px 24px',
+              background: isPrimary ? 'var(--ink)' : 'var(--ivory)',
+              border: `1.5px solid ${isPrimary ? 'var(--ink)' : 'var(--ink)'}`,
+              display: 'flex', flexDirection: 'column', gap: 6,
+              opacity: eased,
+              transform: `translateY(${(1 - eased) * 24}px) scale(${0.9 + eased * 0.1})`,
+            }}>
+              <div style={{
+                fontFamily: 'var(--serif)', fontSize: 30, lineHeight: 1,
+                fontWeight: 500,
+                color: isPrimary ? 'var(--ivory)' : 'var(--ink)',
+              }}>{f.label}</div>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 10,
+                letterSpacing: '0.18em', textTransform: 'uppercase',
+                color: isPrimary ? 'rgba(250,249,245,0.65)' : 'var(--muted)',
+              }}>{f.size}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Wordmark appears as buttons collapse */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        gap: 18,
+        opacity: wordmarkT,
+        transform: `scale(${0.88 + wordmarkE * 0.12})`,
+        pointerEvents: 'none',
+      }}>
+        <div style={{
+          fontFamily: 'var(--serif)', fontWeight: 500,
+          fontSize: 132, letterSpacing: '-0.02em',
+          color: 'var(--ink)',
+        }}>Mathodology</div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 13,
+          letterSpacing: '0.28em', textTransform: 'uppercase',
+          color: 'var(--muted)',
+        }}>github.com / ymylive / mathodology</div>
+      </div>
+
+      {/* skill watermark — bottom-right */}
+      <div style={{
+        position: 'absolute', bottom: 28, right: 36,
+        fontFamily: 'var(--mono)', fontSize: 10,
+        letterSpacing: '0.16em',
+        color: 'rgba(28, 27, 24, 0.35)',
+        pointerEvents: 'none',
+      }}>
+        Created by Huashu-Design
+      </div>
+    </div>
+  );
+}
+
+// ───────── Root ─────────
+function App() {
+  return (
+    <Stage duration={T.TOTAL} width={1280} height={720} bgColor="#FAF9F5" loop={true}>
+      <Sprite start={T.HERO_IN}   end={T.HERO_OUT}>  <Hero /></Sprite>
+      <Sprite start={T.PROMPT_IN} end={T.PROMPT_OUT}><Prompt /></Sprite>
+      <Sprite start={T.PIPE_IN}   end={T.PIPE_OUT}>  <Pipeline /></Sprite>
+      <Sprite start={T.BOOM_IN}   end={T.BOOM_OUT}>  <PaperBoom /></Sprite>
+      <Sprite start={T.OUTRO_IN}  end={T.OUTRO_OUT}> <Outro /></Sprite>
+    </Stage>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>

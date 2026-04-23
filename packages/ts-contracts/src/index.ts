@@ -31,3 +31,30 @@ export interface AgentEvent {
   ts: string;
   payload: Record<string, unknown>;
 }
+
+// Hand-written figure / paper-meta shapes. Mirrors
+// `packages/py-contracts/src/mm_contracts/agent_io.py::Figure` and the
+// `paper.meta.json` structure written by the worker's pipeline. Consumed by
+// the gateway's PDF/DOCX/LaTeX export path.
+export interface Figure {
+  id: string;
+  caption: string;
+  path_png: string;
+  path_svg: string | null;
+  width: number;
+}
+
+export interface PaperSectionMeta {
+  title: string;
+  body_markdown: string;
+}
+
+export interface PaperMeta {
+  title: string;
+  abstract: string;
+  competition_type: "mcm" | "icm" | "cumcm" | "huashu" | "other";
+  problem_text: string;
+  sections: PaperSectionMeta[];
+  references: string[];
+  figures: Figure[];
+}

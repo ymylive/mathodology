@@ -243,19 +243,31 @@ fn build_forward_stream(
                 }
 
                 // Token fan-out (non-empty deltas only, run_id required).
+                // Fire-and-forget: the two Redis round-trips (INCR for seq +
+                // XADD for the stream entry) otherwise add ~3-5ms of serial
+                // blocking per token to the SSE forward path, choking the
+                // upstream rate by ~25-30%. The UI channel is best-effort —
+                // worst case a token briefly doesn't appear on the WS feed.
+                // The worker's own SSE stream is unaffected either way.
                 if let Some(rid) = s.run_id {
                     if !chunk.delta_text.is_empty() {
-                        if let Err(e) = xadd_token(
-                            &mut s.redis,
-                            rid,
-                            s.agent.as_deref(),
-                            &chunk.delta_text,
-                            &s.served_model,
-                        )
-                        .await
-                        {
-                            tracing::warn!(error = %e, "token XADD failed");
-                        }
+                        let mut redis = s.redis.clone();
+                        let agent = s.agent.clone();
+                        let text = chunk.delta_text.clone();
+                        let model = s.served_model.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = xadd_token(
+                                &mut redis,
+                                rid,
+                                agent.as_deref(),
+                                &text,
+                                &model,
+                            )
+                            .await
+                            {
+                                tracing::debug!(error = %e, "token XADD failed");
+                            }
+                        });
                     }
                 }
 

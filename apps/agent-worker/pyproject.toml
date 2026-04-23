@@ -22,6 +22,7 @@ dependencies = [
   "rank-bm25>=0.2.2",
   "fastembed>=0.4",
   "defusedxml>=0.7",
+  "mcp>=1.27.0",
 ]
 
 [dependency-groups]
@@ -43,5 +44,9 @@ packages = ["src/agent_worker"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra -m 'not mcp'"
 asyncio_mode = "auto"
+markers = [
+  "slow: test takes multiple seconds and/or touches the network",
+  "mcp: integration test that spawns a real MCP subprocess (open-websearch)",
+]

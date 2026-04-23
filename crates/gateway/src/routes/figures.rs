@@ -83,6 +83,34 @@ pub async fn serve_notebook(
     serve_file(&canonical, "application/x-ipynb+json", Some(&disposition)).await
 }
 
+/// `GET /runs/:run_id/paper?inline=1` — serve the Writer's paper.md.
+///
+/// Query string `inline=1` renders in-browser (Content-Disposition: inline)
+/// for the on-page preview; omitted forces a download.
+#[tracing::instrument(skip_all, fields(%run_id))]
+pub async fn serve_paper(
+    State(state): State<AppState>,
+    Path(run_id): Path<Uuid>,
+    axum::extract::Query(q): axum::extract::Query<PaperQuery>,
+) -> Result<Response, AppError> {
+    let run_root = state.runs_dir.join(run_id.to_string());
+    let requested = run_root.join("paper.md");
+
+    let canonical = resolve_within(&run_root, &requested).await?;
+
+    let disposition = if q.inline.unwrap_or(false) {
+        format!("inline; filename=\"run-{run_id}.md\"")
+    } else {
+        format!("attachment; filename=\"run-{run_id}.md\"")
+    };
+    serve_file(&canonical, "text/markdown; charset=utf-8", Some(&disposition)).await
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct PaperQuery {
+    pub inline: Option<bool>,
+}
+
 /// Canonicalize `requested` and assert it lives under `prefix` (also canonical
 /// or canonicalizable). Missing file → 404; escape → 403.
 async fn resolve_within(prefix: &StdPath, requested: &StdPath) -> Result<PathBuf, AppError> {

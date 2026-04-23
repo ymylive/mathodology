@@ -152,6 +152,7 @@ export const useRunStore = defineStore("run", {
       opts: {
         reasoningEffort?: "off" | "low" | "medium" | "high";
         longContext?: boolean;
+        modelOverride?: string;
       } = {},
     ) {
       if (this.status === "running" || this.status === "queued") return;
@@ -164,6 +165,9 @@ export const useRunStore = defineStore("run", {
         }
         if (opts.longContext !== undefined) {
           body["long_context"] = opts.longContext;
+        }
+        if (opts.modelOverride) {
+          body["model_override"] = opts.modelOverride;
         }
         const res = await http.post<RunCreated>("/runs", body);
         this.runId = res.run_id;

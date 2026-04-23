@@ -232,12 +232,33 @@ class CellExecution(BaseModel):
     duration_ms: int = 0
 
 
+class Figure(BaseModel):
+    """One saved figure, registered by the Coder and referenced by the Writer.
+
+    `id` is a snake_case slug used as both filename stem and `[[FIG:<id>]]`
+    placeholder key. `path_png` / `path_svg` are relative to the run dir so
+    `paper.meta.json` stays portable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    caption: str
+    path_png: str  # relative to run dir, e.g. "figures/sensitivity_alpha.png"
+    path_svg: str | None = None  # preferred for LaTeX export
+    width: float = Field(default=0.8, gt=0.0, le=1.0)  # \textwidth fraction
+
+
 class CoderOutput(BaseModel):
     """Coder agent output: executed cells, saved figures, final summary."""
 
     model_config = ConfigDict(extra="forbid")
 
     cells: list[CellExecution]
+    # `figures` is the first-class registry (id + caption + paths) the Writer
+    # and exporter consume. `figure_paths` is retained for backward-compat
+    # with existing consumers and tests that expect a flat path list.
+    figures: list[Figure] = Field(default_factory=list)
     figure_paths: list[str] = Field(default_factory=list)
     final_summary: str  # plain-text final answer from the agent
     notebook_path: str  # absolute path to the written .ipynb

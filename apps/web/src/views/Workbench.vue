@@ -20,6 +20,7 @@ import EventLog from "@/components/EventLog.vue";
 import CellView from "@/components/CellView.vue";
 import AgentOutputView from "@/components/AgentOutputView.vue";
 import PaperDraft from "@/components/PaperDraft.vue";
+import ExportPanel from "@/components/ExportPanel.vue";
 import T from "@/components/T.vue";
 
 // Shape of GET /runs/:id — we only need the metadata fields here, not the
@@ -30,6 +31,7 @@ interface RunRecord {
   created_at: string;
   updated_at: string;
   problem_text: string;
+  competition_type: string;
   cost_rmb: number;
   notebook_path: string | null;
   paper_path: string | null;
@@ -111,6 +113,7 @@ async function onStart(payload: { problemText: string }) {
   await run.startRun(payload.problemText, {
     reasoningEffort: settings.reasoningEffort,
     longContext: settings.longContext,
+    modelOverride: settings.model,
   });
   if (run.runId) {
     router.push({ name: "workbench", params: { run_id: run.runId } });
@@ -421,6 +424,15 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
           v-if="paperDraft"
           :output="paperDraft"
           :run-id="routeRunId!"
+        />
+
+        <!-- Consolidated export panel: template picker + PDF / DOCX / TeX /
+             MD / Notebook. Replaces the two header download links. -->
+        <ExportPanel
+          :run-id="routeRunId!"
+          :competition-type="runRecord?.competition_type ?? null"
+          :paper-ready="!!runRecord?.paper_path"
+          :notebook-ready="!!runRecord?.notebook_path"
         />
 
         <div

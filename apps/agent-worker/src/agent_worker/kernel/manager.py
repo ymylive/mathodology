@@ -33,12 +33,51 @@ import nbformat
 from jupyter_client import AsyncKernelManager
 from mm_contracts import CellExecution
 
+from agent_worker._chart_helpers import HELPER_SOURCE as _CHART_HELPERS_SRC
+
 if TYPE_CHECKING:
     from agent_worker.events import EventEmitter
 
 
 CELL_EXECUTION_TIMEOUT_S = 60
 KERNEL_READY_TIMEOUT_S = 30
+
+# Bootstrap source injected once per kernel, right after `start()`. Sets a
+# deterministic matplotlib style with a Chinese-friendly font fallback chain
+# and high savefig DPI so every figure is publication-grade. The chain lists
+# macOS/Windows CJK fonts first and falls back to DejaVu Sans if none are
+# installed — matplotlib skips missing families silently.
+_MPL_BOOTSTRAP_SRC = (
+    """
+import logging
+# The CJK font fallback chain below lists 4 candidates. On any single host
+# only one will exist, and matplotlib logs "Font family 'X' not found" at
+# INFO level for every miss, every figure — 3 spammy lines per plot. The
+# render is still correct (it uses the first found family) so we silence the
+# font_manager logger up to ERROR.
+logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+plt.rcParams["font.family"] = [
+    "Songti SC", "PingFang SC", "Microsoft YaHei", "SimSun", "DejaVu Sans",
+]
+plt.rcParams["axes.unicode_minus"] = False
+plt.rcParams["figure.figsize"] = (6.4, 4.0)
+plt.rcParams["figure.dpi"] = 120
+plt.rcParams["savefig.dpi"] = 300
+plt.rcParams["savefig.bbox"] = "tight"
+plt.rcParams["axes.grid"] = True
+plt.rcParams["grid.alpha"] = 0.25
+plt.rcParams["axes.spines.top"] = False
+plt.rcParams["axes.spines.right"] = False
+"""
+    # Helpers (`styled_figure`, `save_figure`, `annotate_peak`) are defined
+    # in `agent_worker._chart_helpers` and inlined here so the kernel — which
+    # runs as a separate process with its own sys.path — can pick them up
+    # without any import magic. Changes to the helpers belong in that module.
+    + _CHART_HELPERS_SRC
+)
 
 
 class KernelSession:
@@ -71,6 +110,39 @@ class KernelSession:
         self._client.start_channels()
         await self._client.wait_for_ready(timeout=KERNEL_READY_TIMEOUT_S)
         self._started = True
+        # Apply deterministic matplotlib styling (Agg backend, Chinese font
+        # fallback chain, high savefig DPI) before any user code runs. This
+        # cell is invisible — not recorded in `cells`, no events emitted —
+        # so the figure counter and notebook output stay clean.
+        await self._execute_silent(_MPL_BOOTSTRAP_SRC)
+
+    async def _execute_silent(self, source: str) -> None:
+        """Run a cell and drain iopub, emitting nothing and recording nothing.
+
+        Used for the matplotlib bootstrap. Errors are deliberately swallowed
+        — a missing font or a bad rc key must not abort the run.
+        """
+        assert self._client is not None
+        try:
+            msg_id = self._client.execute(source, store_history=False)
+        except Exception:  # noqa: BLE001
+            return
+        while True:
+            try:
+                msg = await asyncio.wait_for(
+                    self._client.get_iopub_msg(timeout=KERNEL_READY_TIMEOUT_S),
+                    timeout=KERNEL_READY_TIMEOUT_S,
+                )
+            except Exception:  # noqa: BLE001
+                return
+            parent = msg.get("parent_header") or {}
+            if parent.get("msg_id") != msg_id:
+                continue
+            if (
+                msg.get("msg_type") == "status"
+                and (msg.get("content") or {}).get("execution_state") == "idle"
+            ):
+                return
 
     async def shutdown(self) -> None:
         """Tear down the kernel; swallow errors so `finally` blocks are safe."""

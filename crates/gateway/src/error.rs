@@ -24,6 +24,12 @@ pub enum AppError {
     #[error("payload too large")]
     PayloadTooLarge,
 
+    #[error("unprocessable entity: {0}")]
+    UnprocessableEntity(String),
+
+    #[error("service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -40,6 +46,12 @@ impl AppError {
                 "unsupported_media_type",
             ),
             AppError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            AppError::UnprocessableEntity(_) => {
+                (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable_entity")
+            }
+            AppError::ServiceUnavailable(_) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable")
+            }
             AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
     }

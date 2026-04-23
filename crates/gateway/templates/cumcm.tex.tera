@@ -1,0 +1,100 @@
+% !TEX TS-program = xelatex
+% CUMCM (全国大学生数学建模竞赛) paper template
+% Self-contained — no external .cls / .sty files required.
+\documentclass[UTF8,a4paper,12pt]{ctexart}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\graphicspath{ {{"{"}}{{ graphics_root }}{{"}"}} }
+% Pandoc-emitted macros that must exist in preamble
+{% raw %}\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\providecommand{\passthrough}[1]{#1}{% endraw %}
+
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue,
+  citecolor=black,
+  pdftitle={ {{ title | latex_escape }} }
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small CUMCM}
+\fancyhead[R]{\small 参赛编号：{{ team_id | latex_escape }}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.5em}{}
+
+\captionsetup{font=small,labelfont=bf}
+
+\begin{document}
+
+% =============== 封面 ===============
+\begin{titlepage}
+\begin{center}
+\vspace*{2cm}
+
+{\Huge\bfseries 全国大学生数学建模竞赛\par}
+\vspace{0.5cm}
+{\LARGE CUMCM\par}
+\vspace{3cm}
+
+\begin{tabular}{rl}
+\Large 题\quad 目： & \Large {{ title | latex_escape }} \\[1.2em]
+\Large 参赛编号： & \Large {{ team_id | latex_escape }} \\[1.2em]
+\Large 问题编号： & \Large {{ problem_id | latex_escape }} \\
+\end{tabular}
+
+\vfill
+\end{center}
+\end{titlepage}
+
+% =============== 摘要页 ===============
+\thispagestyle{plain}
+\begin{center}
+{\LARGE\bfseries 摘\quad 要}
+\end{center}
+\vspace{0.5em}
+
+{\small
+{{ abstract | latex_escape }}
+}
+
+\vspace{1em}
+\noindent\textbf{关键词：} \quad
+
+\newpage
+
+% =============== 目录 ===============
+\tableofcontents
+\newpage
+
+% =============== 正文章节（问题重述等应由 Writer 作为 section 产出） ===============
+{% for sec in sections %}
+\section{ {{- sec.title | latex_escape -}} }
+{{ sec.body_latex | safe }}
+
+{% endfor %}
+
+% =============== 参考文献 ===============
+{% if references and references | length > 0 %}
+\begin{thebibliography}{99}
+{% for ref in references %}
+\bibitem{ref{{ loop.index }}} {{ ref | latex_escape }}
+{% endfor %}
+\end{thebibliography}
+{% endif %}
+
+\end{document}

@@ -1,0 +1,98 @@
+% !TEX TS-program = xelatex
+% MCM / ICM (Mathematical / Interdisciplinary Contest in Modeling) template
+% Self-contained — no external .cls / .sty files required.
+\documentclass[a4paper,11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+% CJK fallback so accidental Chinese characters (bilingual titles, figure
+% captions, team names) render correctly instead of tofu. `ctex` as a package
+% only adds CJK font support — it does NOT change the English article layout.
+% `fontset=fandol` pins to the Fandol fonts bundled with tectonic so the
+% template compiles without system-specific fonts (Songti SC / PingFang SC
+% are macOS-only and fail on Linux CI).
+\usepackage[UTF8,fontset=fandol,heading=false]{ctex}
+\usepackage{graphicx}
+\graphicspath{ {{"{"}}{{ graphics_root }}{{"}"}} }
+% Pandoc-emitted macros that must exist in preamble
+{% raw %}\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\providecommand{\passthrough}[1]{#1}{% endraw %}
+
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{times}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue,
+  citecolor=black,
+  pdftitle={ {{ title | latex_escape }} }
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Team \# {{ team_id | latex_escape }} }
+\fancyhead[R]{\small Page \thepage\ of \pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.4pt}
+\usepackage{lastpage}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.5em}{}
+
+\captionsetup{font=small,labelfont=bf}
+
+\begin{document}
+
+% =============== Summary Sheet ===============
+\thispagestyle{empty}
+\begin{flushleft}
+\begin{tabular}{|p{0.30\textwidth}|p{0.30\textwidth}|p{0.30\textwidth}|}
+\hline
+\textbf{Team Control Number} & \textbf{Problem Chosen} & \textbf{Year} \\
+\hline
+{{ team_id | latex_escape }} & {{ problem_id | latex_escape }} & \\
+\hline
+\end{tabular}
+\end{flushleft}
+
+\vspace{1em}
+\begin{center}
+{\LARGE\bfseries {{ title | latex_escape }} \par}
+\vspace{0.5em}
+{\large\bfseries Summary}
+\end{center}
+
+{\small
+{{ abstract | latex_escape }}
+}
+
+\vspace{1em}
+\noindent\textbf{Keywords:} \quad
+
+\newpage
+
+% =============== Table of Contents ===============
+\tableofcontents
+\newpage
+
+{% for sec in sections %}
+\section{ {{- sec.title | latex_escape -}} }
+{{ sec.body_latex | safe }}
+
+{% endfor %}
+
+{% if references and references | length > 0 %}
+\begin{thebibliography}{99}
+{% for ref in references %}
+\bibitem{ref{{ loop.index }}} {{ ref | latex_escape }}
+{% endfor %}
+\end{thebibliography}
+{% endif %}
+
+\end{document}

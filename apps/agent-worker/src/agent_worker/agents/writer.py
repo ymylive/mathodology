@@ -50,7 +50,16 @@ class WriterAgent(BaseAgent):
                 spec.model_dump(mode="json"), ensure_ascii=False, indent=2
             ),
             coder_summary=coder_output.final_summary,
-            coder_figures=json.dumps(coder_output.figure_paths),
+            # Pass rich figure dicts (id + caption + paths) so the Writer can
+            # emit `[[FIG:<id>]]` placeholders that the pipeline substitutes.
+            # Fall back to legacy path list if the Coder produced no
+            # structured figures (e.g. old notebooks / mock tests).
+            coder_figures=json.dumps(
+                [f.model_dump(mode="json") for f in coder_output.figures]
+                if coder_output.figures
+                else coder_output.figure_paths,
+                ensure_ascii=False,
+            ),
             coder_cells=json.dumps(
                 [
                     {

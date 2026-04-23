@@ -26,10 +26,11 @@ export function notebookUrl(runId: string): string {
   return `${BASE}/runs/${runId}/notebook?token=${encodeURIComponent(TOKEN)}`;
 }
 
-// Paper markdown download URL. The endpoint is not yet implemented (planned
-// for M7+) — this helper exists so the UI can start linking to it without a
-// follow-up frontend change. Until the endpoint lands the URL will 404, so we
-// avoid rendering a button that targets it for now (see PaperDraftView).
-export function paperUrl(runId: string): string {
-  return `${BASE}/runs/${runId}/paper?token=${encodeURIComponent(TOKEN)}`;
+// Paper markdown URL. `inline=true` renders in-browser (text/markdown +
+// Content-Disposition: inline); omitted for attachment download.
+export function paperUrl(runId: string, inline = false): string {
+  const t = encodeURIComponent(TOKEN);
+  return inline
+    ? `${BASE}/runs/${runId}/paper?inline=true&token=${t}`
+    : `${BASE}/runs/${runId}/paper?token=${t}`;
 }

@@ -36,8 +36,17 @@ class ModelerAgent(BaseAgent):
         hmml: HMMLService | None = None,
         prompt_version: str = "v1",
         run_effort: ReasoningEffort = "medium",
+        long_context: bool = False,
+        model_override: str | None = None,
     ) -> None:
-        super().__init__(gateway, emitter, prompt_version, run_effort=run_effort)
+        super().__init__(
+            gateway,
+            emitter,
+            prompt_version,
+            run_effort=run_effort,
+            long_context=long_context,
+            model_override=model_override,
+        )
         self.hmml = hmml
 
     async def run_for(

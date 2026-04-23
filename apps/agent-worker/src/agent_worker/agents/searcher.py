@@ -13,10 +13,12 @@ so the downstream Writer can fall back cleanly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import orjson
 from mm_contracts import (
@@ -29,10 +31,72 @@ from mm_contracts import (
 from pydantic import ValidationError
 
 from agent_worker.agents.base import AgentError, AgentParseError
+from agent_worker.config import get_settings
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.prompts import load_prompt
 from agent_worker.tools.arxiv import batch_search_arxiv
+from agent_worker.tools.web_search_mcp import WebResult, batch_search_web
+
+# Competition types for which a Chinese-language methodology query materially
+# improves Baidu/CSDN/Juejin hit rate.
+_ZH_COMPETITION = {"cumcm", "huashu", "other"}
+
+# Exact-match tracking query keys (utm_* is handled by a prefix rule below);
+# stripping them lets the web-dedupe collapse hits that differ only in noise.
+_TRACKING_PARAMS = ("spm", "fromuid", "share")
+
+
+def _has_cjk(text: str) -> bool:
+    """True if the string contains at least one CJK Unified Ideograph."""
+    return any("一" <= ch <= "鿿" for ch in text)
+
+
+def _extract_zh_keywords(text: str, max_chars: int = 20) -> str:
+    """Pull the first meaningful chunk of CJK text for a Baidu/CSDN query.
+
+    We keep it deterministic and cheap — no jieba, no LLM — since this feeds
+    a search engine which will do its own tokenization. Strips punctuation
+    and ASCII, caps length.
+    """
+    buf: list[str] = []
+    for ch in text:
+        if "一" <= ch <= "鿿":
+            buf.append(ch)
+        elif ch.isspace() and buf and buf[-1] != " ":
+            buf.append(" ")
+        if len(buf) >= max_chars:
+            break
+    return "".join(buf).strip()
+
+
+def _normalize_url(url: str) -> str:
+    """Canonical form for dedupe: strip trailing slash + tracking params."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return url.strip()
+    path = parts.path.rstrip("/") or "/"
+    # Filter out well-known tracking parameters; keep everything else.
+    if parts.query:
+        kept: list[str] = []
+        for kv in parts.query.split("&"):
+            if not kv:
+                continue
+            key = kv.split("=", 1)[0]
+            # `utm_` is a prefix (utm_source, utm_campaign, ...); the others
+            # are exact keys.
+            if key.startswith("utm_"):
+                continue
+            if key in _TRACKING_PARAMS:
+                continue
+            kept.append(kv)
+        query = "&".join(kept)
+    else:
+        query = ""
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, query, "")
+    )
 
 _log = logging.getLogger(__name__)
 
@@ -50,12 +114,14 @@ class SearcherAgent:
         prompt_version: str = "v1",
         run_effort: ReasoningEffort = "medium",
         long_context: bool = False,
+        model_override: str | None = None,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
         self.prompt = load_prompt(self.AGENT_NAME, prompt_version)
         self._run_effort: ReasoningEffort = run_effort
         self._long_context: bool = long_context
+        self._model_override: str | None = model_override
 
     async def run_for(
         self, problem: ProblemInput, analysis: AnalyzerOutput
@@ -71,41 +137,112 @@ class SearcherAgent:
         queries = self._build_queries(problem, analysis)
         await self.emitter.emit(
             "log",
+            # Note: keep the "arXiv queries" prefix — legacy consumers grep
+            # for this token. The same query list drives both arXiv and web.
             {"level": "info", "message": f"arXiv queries: {queries}"},
             agent=self.AGENT_NAME,
         )
 
-        # Phase 2: arXiv fetch (parallel, bounded). Never raises.
-        try:
-            results = await batch_search_arxiv(
-                queries, max_per_query=5, concurrency=2
-            )
-        except Exception as e:  # noqa: BLE001 — belt-and-suspenders; batch already catches
-            await self.emitter.emit(
-                "log",
-                {
-                    "level": "warning",
-                    "message": f"arXiv batch failed entirely: {e}",
-                },
-                agent=self.AGENT_NAME,
-            )
-            results = {}
+        # Phase 2: arXiv + open-webSearch MCP fetch in parallel. Each is
+        # bounded and never raises. Web search is gated behind a config
+        # kill-switch so CI / offline runs skip the Node subprocess.
+        settings = get_settings()
+        web_enabled = not settings.open_websearch_disabled
+        engines = tuple(
+            e.strip()
+            for e in settings.open_websearch_engines.split(",")
+            if e.strip()
+        )
 
-        all_papers = [p for papers in results.values() for p in papers]
-        seen: set[str] = set()
-        unique: list[Paper] = []
-        for p in all_papers:
+        async def _safe_arxiv() -> dict[str, list[Paper]]:
+            try:
+                return await batch_search_arxiv(
+                    queries, max_per_query=5, concurrency=2
+                )
+            except Exception as e:  # noqa: BLE001
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "warning",
+                        "message": f"arXiv batch failed entirely: {e}",
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                return {}
+
+        async def _safe_web() -> dict[str, list[WebResult]]:
+            if not web_enabled or not engines:
+                return {}
+            try:
+                return await batch_search_web(
+                    queries,
+                    engines=engines,
+                    max_per_query=5,
+                    concurrency=2,
+                    command=settings.open_websearch_cmd,
+                )
+            except Exception as e:  # noqa: BLE001
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "warning",
+                        "message": f"web search batch failed entirely: {e}",
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                return {}
+
+        arxiv_results, web_results = await asyncio.gather(
+            _safe_arxiv(), _safe_web()
+        )
+
+        # Dedupe arXiv by arxiv_id (fallback url).
+        arxiv_papers_flat = [p for ps in arxiv_results.values() for p in ps]
+        seen_arxiv: set[str] = set()
+        unique_arxiv: list[Paper] = []
+        for p in arxiv_papers_flat:
             key = p.arxiv_id or p.url
-            if key in seen:
+            if key in seen_arxiv:
                 continue
-            seen.add(key)
-            unique.append(p)
+            seen_arxiv.add(key)
+            unique_arxiv.append(p)
+
+        # Dedupe web by normalized URL, then wrap into Paper. Web entries
+        # have no authors / arxiv_id / published; we surface the engine +
+        # source in relevance_reason so downstream prompts can route them.
+        seen_web: set[str] = set()
+        unique_web: list[Paper] = []
+        for web_hits in web_results.values():
+            for w in web_hits:
+                key = _normalize_url(w.url)
+                if key in seen_web:
+                    continue
+                seen_web.add(key)
+                unique_web.append(
+                    Paper(
+                        title=w.title,
+                        authors=[],
+                        abstract=(w.description or "")[:400],
+                        url=w.url,
+                        arxiv_id=None,
+                        published=None,
+                        relevance_reason=f"[{w.engine}] {w.source or w.url}",
+                    )
+                )
+
+        unique: list[Paper] = unique_arxiv + unique_web
+
         await self.emitter.emit(
             "log",
             {
                 "level": "info",
+                # Keep "unique papers" in the message — legacy log consumers
+                # grep for it and the existing test suite depends on it.
                 "message": (
-                    f"arXiv returned {len(unique)} unique papers "
+                    f"retrieved {len(unique)} unique papers "
+                    f"(arXiv={len(unique_arxiv)}, "
+                    f"web={len(unique_web)} via "
+                    f"{','.join(engines) if engines else 'disabled'}) "
                     f"across {len(queries)} queries"
                 ),
             },
@@ -150,9 +287,14 @@ class SearcherAgent:
     def _build_queries(
         self, problem: ProblemInput, analysis: AnalyzerOutput
     ) -> list[str]:
-        """Build arXiv queries from methodology-oriented terms (high hit rate)
-        plus a couple of sub-questions (broader coverage). Falls back to the
-        problem text if the Analyzer output is thin."""
+        """Build queries from methodology-oriented terms (high hit rate) plus
+        a couple of sub-questions (broader coverage). Falls back to the
+        problem text if the Analyzer output is thin.
+
+        For Chinese competitions (CUMCM / 华数杯 / other) we also append a
+        single Chinese methodology query derived from the problem text —
+        that's what makes Baidu/CSDN/Juejin actually return useful hits.
+        """
         qs: list[str] = []
         # Methodological terms first — these match arXiv keywords reliably.
         for appr in (analysis.proposed_approaches or [])[:2]:
@@ -174,6 +316,17 @@ class SearcherAgent:
                     qs.append(dr.name.strip())
         if not qs:
             qs.append(problem.problem_text[:120])
+
+        # Chinese-competition bonus query. Only emit when the problem text
+        # actually contains CJK characters — otherwise we're wasting a slot.
+        if (
+            problem.competition_type in _ZH_COMPETITION
+            and _has_cjk(problem.problem_text)
+        ):
+            keywords = _extract_zh_keywords(problem.problem_text)
+            if keywords:
+                qs.append(f"{keywords} 数学建模 最优化")
+
         return list(dict.fromkeys(q for q in qs if q))[:5]
 
     async def _synthesize(
@@ -184,7 +337,7 @@ class SearcherAgent:
         papers: list[Paper],
     ) -> SearchFindings:
         """One LLM call to triage + summarize the retrieved papers."""
-        model = self.prompt.model_preference[0]
+        model = self._model_override or self.prompt.model_preference[0]
         papers_payload = [
             {
                 "title": p.title,

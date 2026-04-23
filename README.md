@@ -5,7 +5,9 @@
 
 Production-grade AI agent system for mathematical modeling competitions (MCM / ICM / CUMCM / 华数杯).
 
-**Current phase**: Phase 1 MVP — 4-agent linear pipeline (Analyzer → Modeler → Coder → Writer) with local Jupyter execution, multi-protocol LLM gateway, and streaming frontend.
+![demo](docs/demo.gif)
+
+One problem statement → a full submission-ready paper (PDF / DOCX / TeX / Markdown) in ≈ 30 minutes. Five agents (Analyzer → Searcher → Modeler → Coder → Writer) drive a live Jupyter kernel, stream tokens through a Rust gateway, and produce a 15–20 page paper with 5+ figures that follows COMAP Outstanding / CUMCM 一等奖 conventions.
 
 ## Stack
 

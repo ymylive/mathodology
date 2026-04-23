@@ -1,5 +1,7 @@
 # Mathodology · MathModelAgent-Pro
 
+**English** · [简体中文](./README_zh.md)
+
 ![ci](https://github.com/ymylive/mathodology/actions/workflows/ci.yml/badge.svg)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![version](https://img.shields.io/badge/version-v0.3.0-black)

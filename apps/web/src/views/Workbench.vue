@@ -21,6 +21,8 @@ import CellView from "@/components/CellView.vue";
 import AgentOutputView from "@/components/AgentOutputView.vue";
 import PaperDraft from "@/components/PaperDraft.vue";
 import ExportPanel from "@/components/ExportPanel.vue";
+import SearchConfigPanel from "@/components/SearchConfigPanel.vue";
+import { useSearchConfigStore } from "@/stores/searchConfig";
 import T from "@/components/T.vue";
 
 // Shape of GET /runs/:id — we only need the metadata fields here, not the
@@ -41,6 +43,7 @@ const route = useRoute();
 const router = useRouter();
 const run = useRunStore();
 const settings = useRunSettingsStore();
+const searchConfig = useSearchConfigStore();
 const i18n = useI18n();
 
 // --- live clock for elapsed counters & stage pill durations -----------------
@@ -114,6 +117,9 @@ async function onStart(payload: { problemText: string }) {
     reasoningEffort: settings.reasoningEffort,
     longContext: settings.longContext,
     modelOverride: settings.model,
+    // Snapshot current preferences (applies effectivePrimary so the server
+    // sees a real primary rather than "tavily" when no key is configured).
+    searchConfig: searchConfig.payload,
   });
   if (run.runId) {
     router.push({ name: "workbench", params: { run_id: run.runId } });
@@ -297,6 +303,7 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
           </div>
           <aside>
             <SettingsPanel />
+            <SearchConfigPanel style="margin-top: 20px;" />
           </aside>
         </div>
       </template>

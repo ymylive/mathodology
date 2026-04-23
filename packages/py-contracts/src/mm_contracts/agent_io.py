@@ -22,6 +22,42 @@ AttachmentKind = Literal["csv", "xlsx", "pdf", "image", "text"]
 CompetitionType = Literal["mcm", "icm", "cumcm", "huashu", "other"]
 ReasoningEffort = Literal["off", "low", "medium", "high"]
 
+# Searcher primary source. `none` disables the web leg entirely (arXiv only).
+SearchPrimary = Literal["tavily", "open_websearch", "none"]
+
+# Engines understood by open-webSearch. Kept in sync with what the upstream
+# Node CLI exposes; the Searcher passes the user-selected subset straight
+# through to the MCP tool call.
+SearchEngine = Literal[
+    "bing",
+    "baidu",
+    "duckduckgo",
+    "csdn",
+    "juejin",
+    "brave",
+    "exa",
+    "startpage",
+]
+
+
+class SearchConfig(BaseModel):
+    """User-selectable retrieval routing for the Searcher agent.
+
+    `primary` picks the first web source; `fallback_threshold` decides when
+    the other source kicks in (unique-URL count below the threshold = fall
+    back). `engines` only applies when open-webSearch is actually invoked
+    (either as primary or as fallback).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    primary: SearchPrimary = "tavily"
+    engines: list[SearchEngine] = Field(
+        default_factory=lambda: ["baidu", "csdn", "juejin", "duckduckgo"]
+    )
+    tavily_depth: Literal["basic", "advanced"] = "basic"
+    fallback_threshold: int = Field(default=3, ge=0, le=20)
+
 
 class Attachment(BaseModel):
     """One uploaded file attached to a problem submission."""
@@ -46,6 +82,10 @@ class ProblemInput(BaseModel):
     # User-supplied: disable for default models, enable only for 1M-
     # capable variants (Claude 3.5 Sonnet 1M beta, Gemini 2.0, gpt-5-1m).
     long_context: bool = False
+    # Searcher routing: if None, worker uses env-default config. Decoupled
+    # from `reasoning_effort` so a user can flip source preference without
+    # touching model settings.
+    search_config: SearchConfig | None = None
 
 
 # ---------------------------------------------------------------------------

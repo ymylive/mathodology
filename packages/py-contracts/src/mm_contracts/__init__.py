@@ -19,7 +19,10 @@ from mm_contracts.agent_io import (
     ProblemInput,
     ReasoningEffort,
     RunResult,
+    SearchConfig,
+    SearchEngine,
     SearchFindings,
+    SearchPrimary,
     TokenUsage,
     Variable,
 )
@@ -43,7 +46,10 @@ __all__ = [
     "ProblemInput",
     "ReasoningEffort",
     "RunResult",
+    "SearchConfig",
+    "SearchEngine",
     "SearchFindings",
+    "SearchPrimary",
     "TokenUsage",
     "Variable",
 ]

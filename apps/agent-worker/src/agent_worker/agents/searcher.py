@@ -1,14 +1,23 @@
-"""Searcher agent: derive queries from the Analyzer plan, hit arXiv, synthesize findings.
+"""Searcher agent: derive queries from the Analyzer plan, hit arXiv + a web
+source (Tavily or open-webSearch), synthesize findings.
 
 Does NOT inherit from BaseAgent: there's a deterministic query-building step
-plus a tool (arXiv) call sandwiched between stage.start and the single LLM
-synthesis call. Lifecycle mirrors the other agents:
+plus tool calls sandwiched between stage.start and the single LLM synthesis
+call. Lifecycle mirrors the other agents:
 
-    stage.start → log(queries) → log(unique paper count) → agent.output → stage.done
+    stage.start → log(queries) → log(per-source hit counts)
+                → log(total unique count) → agent.output → stage.done
 
-If arXiv returns nothing for every query (offline / rate-limited), we still
-emit a minimal `SearchFindings` with the queries recorded and empty papers,
-so the downstream Writer can fall back cleanly.
+Routing (see SearchConfig):
+- arXiv is always hit first in parallel (we never skip it).
+- `primary=tavily` → Tavily; if unique hits < `fallback_threshold` we also
+  run open-webSearch as a top-up.
+- `primary=open_websearch` → open-webSearch only (no fallback, there's
+  nowhere to fall back TO).
+- `primary=none` → skip the web leg entirely, arXiv only.
+
+If every source returns nothing we still emit a minimal `SearchFindings`
+with the queries recorded, so the downstream Writer can fall back cleanly.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ from mm_contracts import (
     Paper,
     ProblemInput,
     ReasoningEffort,
+    SearchConfig,
     SearchFindings,
 )
 from pydantic import ValidationError
@@ -36,6 +46,7 @@ from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.prompts import load_prompt
 from agent_worker.tools.arxiv import batch_search_arxiv
+from agent_worker.tools.tavily import TavilyResult, batch_search_tavily
 from agent_worker.tools.web_search_mcp import WebResult, batch_search_web
 
 # Competition types for which a Chinese-language methodology query materially
@@ -126,7 +137,7 @@ class SearcherAgent:
     async def run_for(
         self, problem: ProblemInput, analysis: AnalyzerOutput
     ) -> SearchFindings:
-        """Build queries → hit arXiv → LLM synthesize → SearchFindings."""
+        """Build queries → arXiv + configured web source(s) → LLM synthesize."""
         t0 = time.monotonic()
         await self.emitter.emit(
             "stage.start", {"stage": self.AGENT_NAME}, agent=self.AGENT_NAME
@@ -143,17 +154,20 @@ class SearcherAgent:
             agent=self.AGENT_NAME,
         )
 
-        # Phase 2: arXiv + open-webSearch MCP fetch in parallel. Each is
-        # bounded and never raises. Web search is gated behind a config
-        # kill-switch so CI / offline runs skip the Node subprocess.
+        # Phase 2a: resolve routing. SearchConfig wins over env; env provides
+        # the fallback default (engines list, kill-switch). If the user didn't
+        # send a SearchConfig at all we synthesize one from env — this keeps
+        # the worker runnable with the legacy payload shape.
         settings = get_settings()
-        web_enabled = not settings.open_websearch_disabled
-        engines = tuple(
-            e.strip()
-            for e in settings.open_websearch_engines.split(",")
-            if e.strip()
-        )
+        search_cfg = self._resolve_search_config(problem, settings)
+        engines = tuple(search_cfg.engines)
+        web_disabled = settings.open_websearch_disabled or not engines
+        primary = search_cfg.primary
 
+        # Phase 2b: arXiv always runs. It goes in parallel with the primary
+        # web source (Tavily or open-webSearch). The fallback (if any) runs
+        # sequentially AFTER the primary, because we only know whether to
+        # invoke it once we've counted the primary's unique hits.
         async def _safe_arxiv() -> dict[str, list[Paper]]:
             try:
                 return await batch_search_arxiv(
@@ -170,8 +184,30 @@ class SearcherAgent:
                 )
                 return {}
 
+        async def _safe_tavily() -> dict[str, list[TavilyResult]]:
+            if not settings.tavily_api_key:
+                return {}
+            try:
+                return await batch_search_tavily(
+                    queries,
+                    settings.tavily_api_key,
+                    depth=search_cfg.tavily_depth,
+                    max_per_query=5,
+                    concurrency=3,
+                )
+            except Exception as e:  # noqa: BLE001
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "warning",
+                        "message": f"tavily batch failed entirely: {e}",
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                return {}
+
         async def _safe_web() -> dict[str, list[WebResult]]:
-            if not web_enabled or not engines:
+            if web_disabled:
                 return {}
             try:
                 return await batch_search_web(
@@ -192,8 +228,50 @@ class SearcherAgent:
                 )
                 return {}
 
-        arxiv_results, web_results = await asyncio.gather(
-            _safe_arxiv(), _safe_web()
+        # Decide which "primary" source to run in parallel with arXiv. Empty
+        # dicts mean "not selected"; that simplifies the merge below.
+        tavily_results: dict[str, list[TavilyResult]] = {}
+        web_results: dict[str, list[WebResult]] = {}
+        effective_primary = primary  # may be auto-demoted below
+
+        if primary == "tavily":
+            if not settings.tavily_api_key:
+                # Key missing → quietly demote to open_websearch for this run.
+                effective_primary = "open_websearch"
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "info",
+                        "message": (
+                            "primary=tavily skipped: no TAVILY_API_KEY; "
+                            "falling back to open_websearch"
+                        ),
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                arxiv_results, web_results = await asyncio.gather(
+                    _safe_arxiv(), _safe_web()
+                )
+            else:
+                arxiv_results, tavily_results = await asyncio.gather(
+                    _safe_arxiv(), _safe_tavily()
+                )
+        elif primary == "open_websearch":
+            arxiv_results, web_results = await asyncio.gather(
+                _safe_arxiv(), _safe_web()
+            )
+        else:  # primary == "none"
+            arxiv_results = await _safe_arxiv()
+
+        # Per-source visibility — each source gets exactly one info log, in
+        # fixed order (arXiv first, then whichever web source ran).
+        await self.emitter.emit(
+            "log",
+            {
+                "level": "info",
+                "message": f"arXiv returned {sum(len(v) for v in arxiv_results.values())} papers",
+            },
+            agent=self.AGENT_NAME,
         )
 
         # Dedupe arXiv by arxiv_id (fallback url).
@@ -207,30 +285,83 @@ class SearcherAgent:
             seen_arxiv.add(key)
             unique_arxiv.append(p)
 
-        # Dedupe web by normalized URL, then wrap into Paper. Web entries
-        # have no authors / arxiv_id / published; we surface the engine +
-        # source in relevance_reason so downstream prompts can route them.
+        # Unique-URL dedupe shared across Tavily + web hits. Web dedupe has
+        # to span the fallback hop too — otherwise a site returned by both
+        # Tavily AND open-webSearch would appear twice in `unique`.
         seen_web: set[str] = set()
-        unique_web: list[Paper] = []
-        for web_hits in web_results.values():
-            for w in web_hits:
-                key = _normalize_url(w.url)
-                if key in seen_web:
-                    continue
-                seen_web.add(key)
-                unique_web.append(
-                    Paper(
-                        title=w.title,
-                        authors=[],
-                        abstract=(w.description or "")[:400],
-                        url=w.url,
-                        arxiv_id=None,
-                        published=None,
-                        relevance_reason=f"[{w.engine}] {w.source or w.url}",
-                    )
-                )
+        tavily_papers: list[Paper] = self._tavily_to_papers(
+            tavily_results, seen_web
+        )
+        # Log Tavily's contribution if we actually ran it (even with 0 hits,
+        # for visibility).
+        if effective_primary == "tavily" and settings.tavily_api_key:
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "info",
+                    "message": (
+                        f"primary=tavily: {len(tavily_papers)} papers "
+                        f"(depth={search_cfg.tavily_depth})"
+                    ),
+                },
+                agent=self.AGENT_NAME,
+            )
 
-        unique: list[Paper] = unique_arxiv + unique_web
+        web_papers: list[Paper] = self._web_to_papers(web_results, seen_web)
+        # Log open-webSearch if it ran as primary (we log fallback separately).
+        if effective_primary == "open_websearch" and not web_disabled:
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "info",
+                    "message": (
+                        f"primary=open_websearch: {len(web_papers)} papers "
+                        f"across {len(engines)} engines"
+                    ),
+                },
+                agent=self.AGENT_NAME,
+            )
+
+        # Phase 2c: fallback. Only Tavily-as-primary has a cheaper fallback
+        # (open-webSearch). open_websearch / none have nothing to fall back
+        # TO, so they skip this block.
+        primary_paper_count = (
+            len(tavily_papers) if effective_primary == "tavily" else 0
+        )
+        if (
+            effective_primary == "tavily"
+            and settings.tavily_api_key
+            and primary_paper_count < search_cfg.fallback_threshold
+            and not web_disabled
+        ):
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "info",
+                    "message": (
+                        f"fallback triggered: primary had {primary_paper_count} "
+                        f"< threshold {search_cfg.fallback_threshold}; "
+                        f"running open_websearch"
+                    ),
+                },
+                agent=self.AGENT_NAME,
+            )
+            web_results = await _safe_web()
+            fallback_web_papers = self._web_to_papers(web_results, seen_web)
+            web_papers.extend(fallback_web_papers)
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "info",
+                    "message": (
+                        f"fallback open_websearch: {len(fallback_web_papers)} "
+                        f"papers across {len(engines)} engines"
+                    ),
+                },
+                agent=self.AGENT_NAME,
+            )
+
+        unique: list[Paper] = unique_arxiv + tavily_papers + web_papers
 
         await self.emitter.emit(
             "log",
@@ -241,8 +372,8 @@ class SearcherAgent:
                 "message": (
                     f"retrieved {len(unique)} unique papers "
                     f"(arXiv={len(unique_arxiv)}, "
-                    f"web={len(unique_web)} via "
-                    f"{','.join(engines) if engines else 'disabled'}) "
+                    f"tavily={len(tavily_papers)}, "
+                    f"web={len(web_papers)}) "
                     f"across {len(queries)} queries"
                 ),
             },
@@ -283,6 +414,105 @@ class SearcherAgent:
         return findings
 
     # ------------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _resolve_search_config(
+        problem: ProblemInput, settings: Any  # noqa: ANN401 — Settings, kept loose to avoid import cycle
+    ) -> SearchConfig:
+        """Return the effective SearchConfig for this run.
+
+        User-supplied config (from `ProblemInput.search_config`) wins. Otherwise
+        we synthesize one from env: `tavily` is the default when a key is
+        present, else `open_websearch`. The engine list falls back to the
+        comma-separated `OPEN_WEBSEARCH_ENGINES` env var.
+        """
+        if problem.search_config is not None:
+            return problem.search_config
+        engines_raw = [
+            e.strip()
+            for e in (settings.open_websearch_engines or "").split(",")
+            if e.strip()
+        ]
+        # SearchConfig.engines is Literal-typed; silently drop unknown values
+        # rather than refuse to construct. The typing is advisory for the UI,
+        # not load-bearing for the Searcher.
+        _valid = {"bing", "baidu", "duckduckgo", "csdn", "juejin",
+                  "brave", "exa", "startpage"}
+        engines = [e for e in engines_raw if e in _valid] or [
+            "baidu", "csdn", "juejin", "duckduckgo"
+        ]
+        default_primary = "tavily" if settings.tavily_api_key else "open_websearch"
+        return SearchConfig(
+            primary=default_primary,  # type: ignore[arg-type]
+            engines=engines,  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def _tavily_to_papers(
+        tavily_results: dict[str, list[TavilyResult]],
+        seen_urls: set[str],
+    ) -> list[Paper]:
+        """Flatten Tavily per-query results into deduped Paper records.
+
+        `seen_urls` is an in/out set shared with the open-webSearch side so
+        the same URL coming from both sources doesn't appear twice.
+        """
+        out: list[Paper] = []
+        for hits in tavily_results.values():
+            for t in hits:
+                key = _normalize_url(t.url)
+                if key in seen_urls:
+                    continue
+                seen_urls.add(key)
+                # Extract hostname for the relevance_reason prefix — the
+                # Writer uses this to render references as
+                # `引擎搜索得到 URL, 访问日期 ...`.
+                try:
+                    host = urlsplit(t.url).netloc.lower()
+                except ValueError:
+                    host = ""
+                out.append(
+                    Paper(
+                        title=t.title,
+                        authors=[],
+                        abstract=(t.content or "")[:400],
+                        url=t.url,
+                        arxiv_id=None,
+                        published=t.published_date,
+                        relevance_reason=f"[tavily] {host or t.url}",
+                    )
+                )
+        return out
+
+    @staticmethod
+    def _web_to_papers(
+        web_results: dict[str, list[WebResult]],
+        seen_urls: set[str],
+    ) -> list[Paper]:
+        """Flatten open-webSearch results into deduped Paper records.
+
+        Mirrors `_tavily_to_papers`: `seen_urls` is shared across sources so
+        cross-source duplicates collapse.
+        """
+        out: list[Paper] = []
+        for hits in web_results.values():
+            for w in hits:
+                key = _normalize_url(w.url)
+                if key in seen_urls:
+                    continue
+                seen_urls.add(key)
+                out.append(
+                    Paper(
+                        title=w.title,
+                        authors=[],
+                        abstract=(w.description or "")[:400],
+                        url=w.url,
+                        arxiv_id=None,
+                        published=None,
+                        relevance_reason=f"[{w.engine}] {w.source or w.url}",
+                    )
+                )
+        return out
 
     def _build_queries(
         self, problem: ProblemInput, analysis: AnalyzerOutput

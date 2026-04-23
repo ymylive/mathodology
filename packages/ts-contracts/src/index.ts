@@ -58,3 +58,27 @@ export interface PaperMeta {
   references: string[];
   figures: Figure[];
 }
+
+// Hand-written search-routing contract. Mirrors
+// `packages/py-contracts/src/mm_contracts/agent_io.py::SearchConfig`.
+// The frontend lets the user pick `primary` + engine list; the worker
+// picks up this config off `ProblemInput.search_config` and falls back
+// to env defaults when it's null.
+export type SearchPrimary = "tavily" | "open_websearch" | "none";
+
+export type SearchEngine =
+  | "bing"
+  | "baidu"
+  | "duckduckgo"
+  | "csdn"
+  | "juejin"
+  | "brave"
+  | "exa"
+  | "startpage";
+
+export interface SearchConfig {
+  primary: SearchPrimary;
+  engines: SearchEngine[];
+  tavily_depth: "basic" | "advanced";
+  fallback_threshold: number;
+}

@@ -141,12 +141,22 @@ async def test_searcher_emits_expected_events(
     assert out.key_findings
 
     kinds = [e[0] for e in emitter.events]
-    # Exact order: stage.start, log (queries), log (unique count), agent.output, stage.done.
+    # Expected order (post-Tavily refactor): stage.start, log(queries),
+    # log(arXiv returned N), log(primary=… or arXiv-only), log(unique total),
+    # agent.output, stage.done. The primary-source log only fires when the
+    # web leg actually ran; in this test open-webSearch is stubbed to return
+    # empty so primary=open_websearch is the effective selection (no
+    # TAVILY_API_KEY in env).
     assert kinds[0] == "stage.start"
     assert kinds[1] == "log"
     assert "arXiv queries" in emitter.events[1][1]["message"]
-    assert kinds[2] == "log"
-    assert "unique papers" in emitter.events[2][1]["message"]
+    # Per-source logs, then unique-total. We scan instead of using hard
+    # indices because the number of per-source lines depends on routing.
+    log_messages = [
+        e[1].get("message", "") for e in emitter.events if e[0] == "log"
+    ]
+    assert any("arXiv returned" in m for m in log_messages)
+    assert any("unique papers" in m for m in log_messages)
     assert kinds[-2] == "agent.output"
     assert emitter.events[-2][1]["schema_name"] == "SearchFindings"
     assert kinds[-1] == "stage.done"

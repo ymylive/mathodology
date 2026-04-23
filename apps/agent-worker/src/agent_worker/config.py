@@ -49,6 +49,12 @@ class Settings(BaseSettings):
         default=False, alias="OPEN_WEBSEARCH_DISABLED"
     )
 
+    # --- Tavily (primary web search source; M12 successor) ----------------
+    # Free tier is ~1000 searches/month. When unset the Searcher silently
+    # falls back to open-webSearch regardless of the user's primary choice,
+    # so deploys without a key still work.
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+
 
 def get_settings() -> Settings:
     """Load settings. Kept as a function so tests can override easily."""

@@ -3,7 +3,7 @@ use axum::Router;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::require_dev_token;
-use crate::routes::{export, figures, health, llm, runs, stats, ws_run};
+use crate::routes::{export, figures, health, llm, runs, search, stats, ws_run};
 use crate::state::AppState;
 
 pub fn build_router(state: AppState) -> Router {
@@ -27,6 +27,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/stats/summary", get(stats::stats_summary))
         .route("/stats/providers", get(stats::stats_providers))
         .route("/providers", get(stats::list_providers))
+        .route("/search/capabilities", get(search::capabilities))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_dev_token,

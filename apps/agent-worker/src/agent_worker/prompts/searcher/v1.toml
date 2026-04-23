@@ -18,11 +18,12 @@ Your job:
 2. The `papers` array mixes two kinds of records:
    • Academic papers (arXiv) — recognizable by a non-null `arxiv_id`, a
      populated `authors` list, and an ISO `published` date.
-   • Web results (open-webSearch over Bing/Baidu/DuckDuckGo/CSDN/Juejin/
-     Brave/Exa/Startpage) — recognizable by `arxiv_id: null`, empty
-     `authors`, null `published`, and a `relevance_reason` that already
-     starts with `[<engine>] <source>` (pre-filled by the retrieval layer,
-     PRESERVE the `[engine] source` prefix when you rewrite it).
+   • Web results (Tavily or open-webSearch over Bing/Baidu/DuckDuckGo/CSDN/
+     Juejin/Brave/Exa/Startpage) — recognizable by `arxiv_id: null`, empty
+     `authors`, and a `relevance_reason` that already starts with
+     `[tavily] <host>` or `[<engine>] <source>` (pre-filled by the
+     retrieval layer). PRESERVE that prefix verbatim when you rewrite
+     `relevance_reason`.
 
 3. For each kept item, add / refine the `relevance_reason` to one concrete
    sentence that explains why it matters here. For web results keep the
@@ -37,10 +38,11 @@ Your job:
 5. Produce 3-6 short bullet `key_findings` that summarize what the body of
    literature AND the web material says about the problem — the kind of
    sentences a Writer would drop into a Related Work / Background section.
-   For each bullet sourced from a web hit, prefix it with `[<engine>-<site>]`
-   (for example `[baidu-xxx.gov.cn] ...`) so the Writer can render the
-   reference as `引擎搜索得到 URL, 访问日期 YYYY-MM-DD`. Academic findings
-   do not need this prefix.
+   For each bullet sourced from a web hit, prefix it with
+   `[<engine>-<site>]` (for example `[baidu-xxx.gov.cn] ...` or
+   `[tavily-example.com] ...`) so the Writer can render the reference as
+   `引擎搜索得到 URL, 访问日期 YYYY-MM-DD`. Academic findings do not need
+   this prefix.
 
 6. Extract `datasets_mentioned` — named datasets or data portals appearing
    in abstracts OR web descriptions (e.g. "PeMS", "国家统计局", "CNKI").

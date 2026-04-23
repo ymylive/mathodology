@@ -153,6 +153,12 @@ export const useRunStore = defineStore("run", {
         reasoningEffort?: "off" | "low" | "medium" | "high";
         longContext?: boolean;
         modelOverride?: string;
+        /** SearchConfig snapshot from useSearchConfigStore().payload. Passed
+         *  through verbatim as `search_config` on POST /runs. Absent/null
+         *  means "let the worker pick its default". Shape matches the
+         *  `SearchConfig` interface in stores/searchConfig.ts — typed as
+         *  `unknown` here to keep this store free of a cross-store import. */
+        searchConfig?: unknown;
       } = {},
     ) {
       if (this.status === "running" || this.status === "queued") return;
@@ -168,6 +174,9 @@ export const useRunStore = defineStore("run", {
         }
         if (opts.modelOverride) {
           body["model_override"] = opts.modelOverride;
+        }
+        if (opts.searchConfig) {
+          body["search_config"] = opts.searchConfig;
         }
         const res = await http.post<RunCreated>("/runs", body);
         this.runId = res.run_id;

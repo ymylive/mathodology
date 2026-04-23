@@ -3,13 +3,18 @@
 import { onMounted } from "vue";
 import AppBar from "@/components/AppBar.vue";
 import { useI18n } from "@/composables/useI18n";
+import { useSearchConfigStore } from "@/stores/searchConfig";
 
 const i18n = useI18n();
+const searchConfig = useSearchConfigStore();
 
 onMounted(() => {
   // Apply body.zh before first paint of the routed view so font swaps
   // don't flash from latin → CJK on a persisted Chinese selection.
   i18n.init();
+  // Fire-and-forget capability probe. Resolves to a conservative fallback
+  // on 404 / timeout so the SearchConfigPanel is never blocked on it.
+  void searchConfig.loadCapabilities();
 });
 </script>
 

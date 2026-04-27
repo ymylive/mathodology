@@ -5,6 +5,9 @@
 ![ci](https://github.com/ymylive/mathodology/actions/workflows/ci.yml/badge.svg)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![version](https://img.shields.io/badge/version-v0.3.0-black)
+[![issues](https://img.shields.io/github/issues/ymylive/mathodology)](https://github.com/ymylive/mathodology/issues)
+
+> 👉 **Active work**: [open issues](https://github.com/ymylive/mathodology/issues?q=is%3Aopen) · [project board](https://github.com/users/ymylive/projects/1) · [roadmap](#roadmap--milestones) — every task is tracked as an issue and labeled by phase, so contributors always see the current plan, not yesterday's.
 
 Production-grade AI agent system for mathematical modeling competitions (MCM / ICM / CUMCM / 华数杯).
 

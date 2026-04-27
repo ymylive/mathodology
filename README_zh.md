@@ -5,6 +5,9 @@
 ![ci](https://github.com/ymylive/mathodology/actions/workflows/ci.yml/badge.svg)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![version](https://img.shields.io/badge/version-v0.3.0-black)
+[![issues](https://img.shields.io/github/issues/ymylive/mathodology)](https://github.com/ymylive/mathodology/issues)
+
+> 👉 **进行中的工作**：[活动 issues](https://github.com/ymylive/mathodology/issues?q=is%3Aopen) · [项目看板](https://github.com/users/ymylive/projects/1) · [路线图](#路线图与里程碑) — 每个任务都以 issue 形式追踪，按 phase 打标签，团队成员看到的永远是当前计划，不是昨天的。
 
 面向数学建模竞赛（MCM / ICM / CUMCM / 华数杯）的生产级 AI Agent 系统。
 

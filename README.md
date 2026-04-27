@@ -420,15 +420,15 @@ CI runs the equivalent on every PR — see `.github/workflows/ci.yml`.
 
 ## Roadmap & milestones
 
-| Phase | Status | Summary |
-|---|---|---|
-| **Phase 1 — MVP** | ✅ Shipped (M1–M8) | 4-agent linear pipeline, gateway, streaming UI, local Jupyter |
-| **Phase 2 — Knowledge base** | ✅ Shipped (M9–M11) | HMML method library + BM25 retrieval · Searcher agent · hybrid search |
-| **Phase 3 — Award-grade output** | ✅ Shipped (v0.3.0) | Award-mode prompts · 20-type chart catalog · MAX_ITER=7 · transport retry |
-| **Phase 3.5 — Export + MCP** | ✅ Shipped (v0.3.0) | 4 formats × 3 templates · Tectonic + Pandoc · open-webSearch MCP |
-| **Phase 4 — Critic loop** | In progress | Per-agent critic reviewer · self-refine via critique-act-revise |
-| **Phase 5 — Productionization** | Planned | E2B / Daytona cloud sandbox · multi-tenant JWT · usage metering |
-| **Phase 6 — Vision + multi-lang** | Planned | GPT-4V for chart QA · R + MATLAB kernels · HITL review gates |
+| Phase | Status | Issues | Summary |
+|---|---|---|---|
+| **Phase 1 — MVP** | ✅ Shipped (M1–M8) | _predates tracker_ | 4-agent linear pipeline, gateway, streaming UI, local Jupyter |
+| **Phase 2 — Knowledge base** | ✅ Shipped (M9–M11) | [#1](https://github.com/ymylive/mathodology/issues/1) · [#2](https://github.com/ymylive/mathodology/issues/2) · [#3](https://github.com/ymylive/mathodology/issues/3) | HMML method library + BM25 retrieval · Searcher agent · hybrid search |
+| **Phase 3 — Award-grade output** | ✅ Shipped (v0.3.0) | [#4](https://github.com/ymylive/mathodology/issues/4) · [#5](https://github.com/ymylive/mathodology/issues/5) | Award-mode prompts · 20-type chart catalog · MAX_ITER=7 · transport retry |
+| **Phase 3.5 — Export + MCP** | ✅ Shipped (v0.3.0) | [#6](https://github.com/ymylive/mathodology/issues/6) · [#7](https://github.com/ymylive/mathodology/issues/7) · [#8](https://github.com/ymylive/mathodology/issues/8) | 4 formats × 3 templates · Tectonic + Pandoc · open-webSearch MCP |
+| **Phase 4 — Critic loop** | 🟡 In progress | [#9](https://github.com/ymylive/mathodology/issues/9) | Per-agent critic reviewer · self-refine via critique-act-revise |
+| **Phase 5 — Productionization** | 📋 Planned | [#10](https://github.com/ymylive/mathodology/issues/10) · [#11](https://github.com/ymylive/mathodology/issues/11) · [#12](https://github.com/ymylive/mathodology/issues/12) | E2B / Daytona cloud sandbox · multi-tenant JWT · usage metering |
+| **Phase 6 — Vision + multi-lang** | 📋 Planned | [#13](https://github.com/ymylive/mathodology/issues/13) · [#14](https://github.com/ymylive/mathodology/issues/14) · [#15](https://github.com/ymylive/mathodology/issues/15) | GPT-4V for chart QA · R + MATLAB kernels · HITL review gates |
 
 ### Detailed milestone log
 

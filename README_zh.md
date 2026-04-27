@@ -420,15 +420,15 @@ pnpm --filter web typecheck && pnpm --filter web build
 
 ## 路线图与里程碑
 
-| 阶段 | 状态 | 概述 |
-|---|---|---|
-| **Phase 1 — MVP** | ✅ 已发（M1–M8）| 4-agent 线性流水线、网关、streaming UI、本地 Jupyter |
-| **Phase 2 — 知识库** | ✅ 已发（M9–M11）| HMML 方法库 + BM25 检索 · Searcher agent · 混合搜索 |
-| **Phase 3 — 获奖级产出** | ✅ 已发（v0.3.0）| 获奖 prompt · 20 类图表目录 · MAX_ITER=7 · 传输 retry |
-| **Phase 3.5 — 导出 + MCP** | ✅ 已发（v0.3.0）| 4 格式 × 3 模板 · Tectonic + Pandoc · open-webSearch MCP |
-| **Phase 4 — Critic loop** | 进行中 | 每个 agent 的 critic 审查 · critique-act-revise 自我精修 |
-| **Phase 5 — 生产化** | 规划中 | E2B / Daytona 云沙箱 · 多租户 JWT · 用量计费 |
-| **Phase 6 — 视觉 + 多语言** | 规划中 | GPT-4V 检查图表 · R + MATLAB kernel · HITL review gate |
+| 阶段 | 状态 | Issues | 概述 |
+|---|---|---|---|
+| **Phase 1 — MVP** | ✅ 已发（M1–M8）| _早于 tracker_ | 4-agent 线性流水线、网关、streaming UI、本地 Jupyter |
+| **Phase 2 — 知识库** | ✅ 已发（M9–M11）| [#1](https://github.com/ymylive/mathodology/issues/1) · [#2](https://github.com/ymylive/mathodology/issues/2) · [#3](https://github.com/ymylive/mathodology/issues/3) | HMML 方法库 + BM25 检索 · Searcher agent · 混合搜索 |
+| **Phase 3 — 获奖级产出** | ✅ 已发（v0.3.0）| [#4](https://github.com/ymylive/mathodology/issues/4) · [#5](https://github.com/ymylive/mathodology/issues/5) | 获奖 prompt · 20 类图表目录 · MAX_ITER=7 · 传输 retry |
+| **Phase 3.5 — 导出 + MCP** | ✅ 已发（v0.3.0）| [#6](https://github.com/ymylive/mathodology/issues/6) · [#7](https://github.com/ymylive/mathodology/issues/7) · [#8](https://github.com/ymylive/mathodology/issues/8) | 4 格式 × 3 模板 · Tectonic + Pandoc · open-webSearch MCP |
+| **Phase 4 — Critic loop** | 🟡 进行中 | [#9](https://github.com/ymylive/mathodology/issues/9) | 每个 agent 的 critic 审查 · critique-act-revise 自我精修 |
+| **Phase 5 — 生产化** | 📋 规划中 | [#10](https://github.com/ymylive/mathodology/issues/10) · [#11](https://github.com/ymylive/mathodology/issues/11) · [#12](https://github.com/ymylive/mathodology/issues/12) | E2B / Daytona 云沙箱 · 多租户 JWT · 用量计费 |
+| **Phase 6 — 视觉 + 多语言** | 📋 规划中 | [#13](https://github.com/ymylive/mathodology/issues/13) · [#14](https://github.com/ymylive/mathodology/issues/14) · [#15](https://github.com/ymylive/mathodology/issues/15) | GPT-4V 检查图表 · R + MATLAB kernel · HITL review gate |
 
 ### 详细里程碑日志
 

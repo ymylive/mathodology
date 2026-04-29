@@ -10,7 +10,7 @@
              -dWebDistSrc=..\..\apps\web\dist ^
              -dWorkerSrc=..\..\apps\agent-worker ^
              -dPyContractsSrc=..\..\packages\py-contracts
-      light  -ext WixUIExtension -ext WixUtilExtension ^
+      light  -ext WixUIExtension ^
              Mathodology.wixobj auto-web.wixobj auto-worker.wixobj auto-pycontracts.wixobj ^
              -o mathodology-%VERSION%.msi
 
@@ -22,8 +22,7 @@
   Authenticode certificate. Sign in CI with `signtool sign` if/when one
   becomes available.
 -->
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
-     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
 
   <Product Id="*"
            Name="Mathodology"
@@ -171,17 +170,17 @@
       </Component>
     </ComponentGroup>
 
-    <!-- PATH amendment via util:EnvironmentVariable. Action=set + Part=last
+    <!-- PATH amendment via WiX Environment. Action=set + Part=last
          appends if not present, no-op otherwise. Removed on uninstall. -->
     <ComponentGroup Id="PathEntry" Directory="INSTALLDIR">
       <Component Id="EnvPath" Guid="A8E8C4D2-7B3F-4E91-9A6E-8D2B5F7E1C30">
-        <util:EnvironmentVariable Id="MathodologyPath"
-                                  Name="PATH"
-                                  Value="[INSTALLDIR]"
-                                  Permanent="no"
-                                  Part="last"
-                                  Action="set"
-                                  System="yes" />
+        <Environment Id="MathodologyPath"
+                     Name="PATH"
+                     Value="[INSTALLDIR]"
+                     Permanent="no"
+                     Part="last"
+                     Action="set"
+                     System="yes" />
         <RegistryValue Root="HKLM" Key="Software\Mathodology\Mathodology"
                        Name="PathEntry" Type="integer" Value="1" KeyPath="yes" />
       </Component>

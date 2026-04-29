@@ -50,9 +50,9 @@ candle.exe -nologo -arch x64 ^
        Mathodology.wxs auto-web.wxs auto-worker.wxs auto-pycontracts.wxs ^
        || exit /b 1
 
-REM 3. link. WixUIExtension -> InstallDir UI; WixUtilExtension -> EnvironmentVariable.
+REM 3. link. WixUIExtension -> InstallDir UI.
 light.exe  -nologo ^
-       -ext WixUIExtension -ext WixUtilExtension ^
+       -ext WixUIExtension ^
        Mathodology.wixobj auto-web.wixobj auto-worker.wixobj auto-pycontracts.wixobj ^
        -o mathodology-%VERSION%.msi ^
        || exit /b 1

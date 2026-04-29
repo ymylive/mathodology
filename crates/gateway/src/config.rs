@@ -30,8 +30,8 @@ impl AppConfig {
             .context("GATEWAY_PORT must be a valid u16")?;
         let dev_auth_token =
             std::env::var("DEV_AUTH_TOKEN").context("DEV_AUTH_TOKEN env var is required")?;
-        let redis_url = std::env::var("REDIS_URL")
-            .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
+        let redis_url =
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
         let database_url =
             std::env::var("DATABASE_URL").context("DATABASE_URL env var is required")?;
         let providers_path = std::env::var("PROVIDERS_PATH")

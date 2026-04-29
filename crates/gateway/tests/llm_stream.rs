@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::serve;
-use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use sqlx::postgres::PgPoolOptions;
 use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
@@ -77,8 +77,8 @@ fallback = []
 }
 
 async fn build_state(providers_path: PathBuf) -> AppState {
-    let redis_url = std::env::var("TEST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
+    let redis_url =
+        std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
     let database_url = std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://mm:mm@127.0.0.1:5432/mm".into());
 
@@ -113,8 +113,7 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         runs_dir: runs_dir.clone(),
         static_dir: None,
     };
-    let llm =
-        LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
+    let llm = LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
 
     AppState {
         redis,
@@ -158,10 +157,7 @@ async fn sse_stream_forwards_chunks() {
 
     // --- 4. POST the streaming request. ----------------------------------
     let mut headers = HeaderMap::new();
-    headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(
         reqwest::header::AUTHORIZATION,
         HeaderValue::from_str(&format!("Bearer {DEV_TOKEN}")).unwrap(),

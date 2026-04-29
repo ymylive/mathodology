@@ -152,9 +152,8 @@ async fn xread_one_batch(
     last_id: &str,
     opts: &StreamReadOptions,
 ) -> redis::RedisResult<Option<Vec<(String, String)>>> {
-    let reply: Option<StreamReadReply> = redis
-        .xread_options(&[stream_key], &[last_id], opts)
-        .await?;
+    let reply: Option<StreamReadReply> =
+        redis.xread_options(&[stream_key], &[last_id], opts).await?;
 
     let Some(reply) = reply else { return Ok(None) };
 
@@ -195,11 +194,7 @@ async fn insert_audit_row(pg: &sqlx::PgPool, env: &EventEnvelope) -> sqlx::Resul
 }
 
 /// Advance `runs.status` / `runs.cost_rmb` based on the event kind.
-async fn apply_lifecycle(
-    pg: &sqlx::PgPool,
-    run_id: Uuid,
-    env: &EventEnvelope,
-) -> sqlx::Result<()> {
+async fn apply_lifecycle(pg: &sqlx::PgPool, run_id: Uuid, env: &EventEnvelope) -> sqlx::Result<()> {
     match env.kind.as_str() {
         "stage.start" => {
             // First stage.start promotes queued -> running.

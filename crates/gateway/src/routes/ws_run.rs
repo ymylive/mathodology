@@ -36,11 +36,7 @@ pub async fn ws_handler(
     })
 }
 
-async fn handle_socket(
-    mut socket: WebSocket,
-    state: AppState,
-    run_id: Uuid,
-) -> anyhow::Result<()> {
+async fn handle_socket(mut socket: WebSocket, state: AppState, run_id: Uuid) -> anyhow::Result<()> {
     let stream_key = events_stream_key(&run_id);
     let mut redis = state.redis.clone();
 
@@ -145,9 +141,8 @@ async fn xread_once(
     last_id: &str,
     opts: &StreamReadOptions,
 ) -> redis::RedisResult<Option<Vec<(String, String)>>> {
-    let reply: Option<StreamReadReply> = redis
-        .xread_options(&[stream_key], &[last_id], opts)
-        .await?;
+    let reply: Option<StreamReadReply> =
+        redis.xread_options(&[stream_key], &[last_id], opts).await?;
 
     let Some(reply) = reply else {
         return Ok(None);

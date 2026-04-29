@@ -79,8 +79,8 @@ fallback = ["model-b"]
 }
 
 async fn build_state(providers_path: PathBuf) -> AppState {
-    let redis_url = std::env::var("TEST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
+    let redis_url =
+        std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
     let database_url = std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://mm:mm@127.0.0.1:5432/mm".into());
 
@@ -112,8 +112,7 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         runs_dir: runs_dir.clone(),
         static_dir: None,
     };
-    let llm =
-        LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
+    let llm = LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
 
     AppState {
         redis,
@@ -149,8 +148,7 @@ async fn router_falls_back_on_503_to_next_model() {
         .mount(&fallback)
         .await;
 
-    let providers_file =
-        write_providers_toml(&primary.uri(), &fallback.uri()).await;
+    let providers_file = write_providers_toml(&primary.uri(), &fallback.uri()).await;
     let state = build_state(providers_file.path().to_path_buf()).await;
 
     let router = build_router(state);

@@ -96,10 +96,7 @@ pub async fn capabilities() -> Result<Response, AppError> {
     let caps = SearchCapabilities::from_env(|k| std::env::var(k).ok());
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store"),
-    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok((headers, Json(caps)).into_response())
 }
 
@@ -165,7 +162,14 @@ mod tests {
         assert_eq!(
             engines,
             vec![
-                "bing", "baidu", "duckduckgo", "csdn", "juejin", "brave", "exa", "startpage",
+                "bing",
+                "baidu",
+                "duckduckgo",
+                "csdn",
+                "juejin",
+                "brave",
+                "exa",
+                "startpage",
             ]
         );
     }

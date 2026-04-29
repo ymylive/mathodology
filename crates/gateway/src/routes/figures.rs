@@ -57,10 +57,7 @@ pub async fn serve_figure(
         _ => return Err(AppError::UnsupportedMediaType),
     };
 
-    let figures_root = state
-        .runs_dir
-        .join(run_id.to_string())
-        .join("figures");
+    let figures_root = state.runs_dir.join(run_id.to_string()).join("figures");
     let requested = figures_root.join(&tail);
 
     let canonical = resolve_within(&figures_root, &requested).await?;
@@ -103,7 +100,12 @@ pub async fn serve_paper(
     } else {
         format!("attachment; filename=\"run-{run_id}.md\"")
     };
-    serve_file(&canonical, "text/markdown; charset=utf-8", Some(&disposition)).await
+    serve_file(
+        &canonical,
+        "text/markdown; charset=utf-8",
+        Some(&disposition),
+    )
+    .await
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -163,10 +165,7 @@ async fn serve_file(
     }
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(content_type),
-    );
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     headers.insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("private, max-age=3600"),

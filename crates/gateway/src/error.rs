@@ -41,10 +41,9 @@ impl AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
-            AppError::UnsupportedMediaType => (
-                StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                "unsupported_media_type",
-            ),
+            AppError::UnsupportedMediaType => {
+                (StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type")
+            }
             AppError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             AppError::UnprocessableEntity(_) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable_entity")

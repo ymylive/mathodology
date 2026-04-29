@@ -33,7 +33,11 @@ impl LlmContext {
             registry.default_model,
             registry.fallback,
         );
-        Ok(Arc::new(Self { router, prices, meta }))
+        Ok(Arc::new(Self {
+            router,
+            prices,
+            meta,
+        }))
     }
 
     pub fn providers_meta(&self) -> Vec<ProviderMeta> {

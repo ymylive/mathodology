@@ -52,8 +52,8 @@ fallback = []
 }
 
 async fn build_state(providers_path: PathBuf) -> AppState {
-    let redis_url = std::env::var("TEST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
+    let redis_url =
+        std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
     let database_url = std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://mm:mm@127.0.0.1:5432/mm".into());
 
@@ -107,10 +107,7 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn capture(keys: &[&'static str]) -> Self {
-        let vars = keys
-            .iter()
-            .map(|k| (*k, std::env::var(k).ok()))
-            .collect();
+        let vars = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
         Self { vars }
     }
 
@@ -256,7 +253,14 @@ async fn search_capabilities_end_to_end() {
     assert_eq!(
         json["available_engines"],
         serde_json::json!([
-            "bing", "baidu", "duckduckgo", "csdn", "juejin", "brave", "exa", "startpage"
+            "bing",
+            "baidu",
+            "duckduckgo",
+            "csdn",
+            "juejin",
+            "brave",
+            "exa",
+            "startpage"
         ])
     );
 

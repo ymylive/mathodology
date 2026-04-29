@@ -10,9 +10,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use crate::llm::canonical::{
-    CanonicalChunk, CanonicalRequest, CanonicalResponse, Usage,
-};
+use crate::llm::canonical::{CanonicalChunk, CanonicalRequest, CanonicalResponse, Usage};
 use crate::llm::providers::{ProviderAdapter, ProviderError};
 
 /// Live adapter for OpenAI-compatible HTTP endpoints.
@@ -83,10 +81,7 @@ impl OpenAICompatAdapter {
 
     fn build_request(&self, body: Value) -> reqwest::RequestBuilder {
         let url = format!("{}/chat/completions", self.base_url);
-        let mut rb = self
-            .http
-            .post(url)
-            .header(CONTENT_TYPE, "application/json");
+        let mut rb = self.http.post(url).header(CONTENT_TYPE, "application/json");
         if !self.api_key.is_empty() {
             rb = rb.header(AUTHORIZATION, format!("Bearer {}", self.api_key));
         }
@@ -104,10 +99,7 @@ impl ProviderAdapter for OpenAICompatAdapter {
         self.models.iter().any(|m| m == model)
     }
 
-    async fn complete(
-        &self,
-        req: CanonicalRequest,
-    ) -> Result<CanonicalResponse, ProviderError> {
+    async fn complete(&self, req: CanonicalRequest) -> Result<CanonicalResponse, ProviderError> {
         let body = self.build_body(&req, false);
         let resp = self.build_request(body).send().await?;
         let status = resp.status();
@@ -125,8 +117,7 @@ impl ProviderAdapter for OpenAICompatAdapter {
     async fn stream(
         &self,
         req: CanonicalRequest,
-    ) -> Result<BoxStream<'static, Result<CanonicalChunk, ProviderError>>, ProviderError>
-    {
+    ) -> Result<BoxStream<'static, Result<CanonicalChunk, ProviderError>>, ProviderError> {
         let body = self.build_body(&req, true);
         let resp = self
             .build_request(body)
@@ -183,8 +174,8 @@ impl ProviderAdapter for OpenAICompatAdapter {
 /// Parse a single `data:` SSE frame into a canonical chunk. Extracts the text
 /// delta from `choices[0].delta.content` and `usage` if present.
 fn parse_openai_chunk(data: &str) -> Result<CanonicalChunk, ProviderError> {
-    let v: Value = serde_json::from_str(data)
-        .map_err(|e| ProviderError::Parse(format!("chunk json: {e}")))?;
+    let v: Value =
+        serde_json::from_str(data).map_err(|e| ProviderError::Parse(format!("chunk json: {e}")))?;
 
     let delta_text = v
         .get("choices")

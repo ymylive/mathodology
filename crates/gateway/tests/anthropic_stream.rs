@@ -47,10 +47,7 @@ fn anthropic_sse_body() -> String {
             "content_block_start",
             r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
         ),
-        (
-            "ping",
-            r#"{"type":"ping"}"#,
-        ),
+        ("ping", r#"{"type":"ping"}"#),
         (
             "content_block_delta",
             r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#,
@@ -67,10 +64,7 @@ fn anthropic_sse_body() -> String {
             "message_delta",
             r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":25}}"#,
         ),
-        (
-            "message_stop",
-            r#"{"type":"message_stop"}"#,
-        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
     ];
     let mut body = String::new();
     for (ev, data) in events {
@@ -107,8 +101,8 @@ fallback = []
 }
 
 async fn build_state(providers_path: PathBuf) -> AppState {
-    let redis_url = std::env::var("TEST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
+    let redis_url =
+        std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
     let database_url = std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://mm:mm@127.0.0.1:5432/mm".into());
 
@@ -140,8 +134,7 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         runs_dir: runs_dir.clone(),
         static_dir: None,
     };
-    let llm =
-        LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
+    let llm = LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
 
     AppState {
         redis,

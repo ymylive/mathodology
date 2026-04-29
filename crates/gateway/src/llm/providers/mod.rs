@@ -40,10 +40,9 @@ impl ProviderError {
     pub fn is_retryable(&self) -> bool {
         match self {
             ProviderError::Network(_) | ProviderError::Timeout => true,
-            ProviderError::HttpStatus(s, _) => matches!(
-                s.as_u16(),
-                408 | 425 | 429 | 500 | 502 | 503 | 504
-            ),
+            ProviderError::HttpStatus(s, _) => {
+                matches!(s.as_u16(), 408 | 425 | 429 | 500 | 502 | 503 | 504)
+            }
             ProviderError::BadConfig(_) | ProviderError::Parse(_) => false,
         }
     }
@@ -80,10 +79,7 @@ impl From<ProviderError> for AppError {
 pub trait ProviderAdapter: Send + Sync {
     fn name(&self) -> &str;
     fn supports(&self, model: &str) -> bool;
-    async fn complete(
-        &self,
-        req: CanonicalRequest,
-    ) -> Result<CanonicalResponse, ProviderError>;
+    async fn complete(&self, req: CanonicalRequest) -> Result<CanonicalResponse, ProviderError>;
     async fn stream(
         &self,
         req: CanonicalRequest,

@@ -60,8 +60,8 @@ fallback = []
 }
 
 async fn build_state(providers_path: PathBuf) -> AppState {
-    let redis_url = std::env::var("TEST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
+    let redis_url =
+        std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".into());
     let database_url = std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://mm:mm@127.0.0.1:5432/mm".into());
 
@@ -93,8 +93,7 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         runs_dir: runs_dir.clone(),
         static_dir: None,
     };
-    let llm =
-        LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
+    let llm = LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");
 
     AppState {
         redis,
@@ -162,8 +161,8 @@ async fn openai_compat_receives_reasoning_fields() {
     // Inspect the wiremock-captured request: both fields must be present.
     let requests: Vec<Request> = mock.received_requests().await.unwrap_or_default();
     assert!(!requests.is_empty(), "upstream provider must be called");
-    let upstream_body: Value = serde_json::from_slice(&requests[0].body)
-        .expect("upstream body is JSON");
+    let upstream_body: Value =
+        serde_json::from_slice(&requests[0].body).expect("upstream body is JSON");
     assert_eq!(
         upstream_body["reasoning_effort"], "high",
         "top-level reasoning_effort must survive the translation"
@@ -229,8 +228,8 @@ async fn openai_compat_off_strips_reasoning_fields() {
 
     let requests: Vec<Request> = mock.received_requests().await.unwrap_or_default();
     assert!(!requests.is_empty());
-    let upstream_body: Value = serde_json::from_slice(&requests[0].body)
-        .expect("upstream body is JSON");
+    let upstream_body: Value =
+        serde_json::from_slice(&requests[0].body).expect("upstream body is JSON");
     assert!(
         upstream_body.get("reasoning_effort").is_none(),
         "`off` must NOT emit reasoning_effort (got {upstream_body})"

@@ -51,7 +51,12 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to create RUNS_DIR at {}", cfg.runs_dir.display()))?;
     let runs_dir_canonical = tokio::fs::canonicalize(&cfg.runs_dir)
         .await
-        .with_context(|| format!("failed to canonicalize RUNS_DIR at {}", cfg.runs_dir.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to canonicalize RUNS_DIR at {}",
+                cfg.runs_dir.display()
+            )
+        })?;
     tracing::info!(path = %runs_dir_canonical.display(), "runs_dir ready");
 
     let state = AppState {

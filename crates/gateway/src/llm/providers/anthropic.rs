@@ -22,9 +22,7 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use crate::llm::canonical::{
-    CanonicalChunk, CanonicalRequest, CanonicalResponse, Usage,
-};
+use crate::llm::canonical::{CanonicalChunk, CanonicalRequest, CanonicalResponse, Usage};
 use crate::llm::providers::{ProviderAdapter, ProviderError};
 
 /// Anthropic API version pinned to the request header. Update this (and the
@@ -40,8 +38,7 @@ const DEFAULT_MAX_TOKENS: u32 = 4096;
 /// Suffix appended to the system prompt when the canonical request asks for
 /// JSON output via `response_format`. Anthropic's `/v1/messages` has no
 /// dedicated knob for structured output, so we steer the model with text.
-const JSON_RESPONSE_SUFFIX: &str =
-    "\n\nRespond with a single valid JSON object only. \
+const JSON_RESPONSE_SUFFIX: &str = "\n\nRespond with a single valid JSON object only. \
     Do not include prose, markdown fences, or commentary before or after the JSON.";
 
 /// Live adapter for `api.anthropic.com` (and any Anthropic-compatible proxy).
@@ -186,10 +183,7 @@ impl ProviderAdapter for AnthropicAdapter {
         self.models.iter().any(|m| m == model)
     }
 
-    async fn complete(
-        &self,
-        req: CanonicalRequest,
-    ) -> Result<CanonicalResponse, ProviderError> {
+    async fn complete(&self, req: CanonicalRequest) -> Result<CanonicalResponse, ProviderError> {
         let body = self.build_body(&req, false);
         let resp = self.build_request(body).send().await?;
         let status = resp.status();
@@ -207,8 +201,7 @@ impl ProviderAdapter for AnthropicAdapter {
     async fn stream(
         &self,
         req: CanonicalRequest,
-    ) -> Result<BoxStream<'static, Result<CanonicalChunk, ProviderError>>, ProviderError>
-    {
+    ) -> Result<BoxStream<'static, Result<CanonicalChunk, ProviderError>>, ProviderError> {
         let body = self.build_body(&req, true);
         let resp = self
             .build_request(body)
@@ -255,10 +248,7 @@ impl ProviderAdapter for AnthropicAdapter {
                         Some(Ok(ev)) => {
                             match parse_anthropic_event(&ev.event, &ev.data, &mut acc) {
                                 Ok(Some(chunk)) => {
-                                    return Some((
-                                        Ok(chunk),
-                                        (events, acc, false, name),
-                                    ));
+                                    return Some((Ok(chunk), (events, acc, false, name)));
                                 }
                                 Ok(None) => {
                                     // Event was a no-op (ping, content_block_start,
@@ -352,10 +342,7 @@ fn parse_anthropic_event(
             }
         }
         "message_delta" => {
-            if let Some(t) = v
-                .pointer("/usage/output_tokens")
-                .and_then(Value::as_u64)
-            {
+            if let Some(t) = v.pointer("/usage/output_tokens").and_then(Value::as_u64) {
                 acc.completion_tokens = t as u32;
             }
             // Emit the synthetic usage chunk on the first message_delta we
@@ -440,14 +427,8 @@ fn from_anthropic_response(v: Value) -> CanonicalResponse {
     let (prompt_tokens, completion_tokens) = v
         .get("usage")
         .map(|u| {
-            let i = u
-                .get("input_tokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as u32;
-            let o = u
-                .get("output_tokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as u32;
+            let i = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as u32;
+            let o = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0) as u32;
             (i, o)
         })
         .unwrap_or((0, 0));
@@ -554,11 +535,7 @@ mod tests {
             vec!["claude-sonnet-4-6".into()],
             Client::new(),
         );
-        let req = mk_req_with(vec![
-            ("system", "one"),
-            ("system", "two"),
-            ("user", "go"),
-        ]);
+        let req = mk_req_with(vec![("system", "one"), ("system", "two"), ("user", "go")]);
         let body = adapter.build_body(&req, false);
         assert_eq!(body["system"], "one\n\ntwo");
     }
@@ -600,7 +577,10 @@ mod tests {
             let body = adapter.build_body(&req, false);
             assert_eq!(body["thinking"]["budget_tokens"], expected, "level {level}");
             let mt = body["max_tokens"].as_u64().unwrap();
-            assert!(mt >= expected + 1024, "max_tokens {mt} < budget+1024 for {level}");
+            assert!(
+                mt >= expected + 1024,
+                "max_tokens {mt} < budget+1024 for {level}"
+            );
         }
     }
 
@@ -708,25 +688,19 @@ mod tests {
         assert_eq!(u.completion_tokens, 25);
         assert_eq!(u.total_tokens, 35);
 
-        let chunk = parse_anthropic_event(
-            "message_stop",
-            r#"{"type":"message_stop"}"#,
-            &mut acc,
-        )
-        .unwrap();
+        let chunk =
+            parse_anthropic_event("message_stop", r#"{"type":"message_stop"}"#, &mut acc).unwrap();
         assert!(chunk.is_none());
     }
 
     #[test]
     fn parse_ignores_ping_and_block_boundaries() {
         let mut acc = Accum::default();
-        assert!(parse_anthropic_event(
-            "ping",
-            r#"{"type":"ping"}"#,
-            &mut acc,
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            parse_anthropic_event("ping", r#"{"type":"ping"}"#, &mut acc,)
+                .unwrap()
+                .is_none()
+        );
         assert!(parse_anthropic_event(
             "content_block_start",
             r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,

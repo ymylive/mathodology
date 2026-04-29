@@ -213,9 +213,7 @@ async fn figure_path_traversal_blocked() {
 async fn raw_http_get_status(addr: SocketAddr, target: &str, auth: Option<&str>) -> u16 {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let mut req = format!(
-        "GET {target} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n"
-    );
+    let mut req = format!("GET {target} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
     if let Some(a) = auth {
         req.push_str(&format!("Authorization: {a}\r\n"));
     }

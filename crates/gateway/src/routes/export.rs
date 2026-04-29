@@ -134,9 +134,7 @@ impl ExportFormat {
             Self::Md => "text/markdown; charset=utf-8",
             Self::Tex => "application/x-tex",
             Self::Pdf => "application/pdf",
-            Self::Docx => {
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            }
+            Self::Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }
     }
 }
@@ -198,10 +196,7 @@ fn tera() -> &'static Tera {
                 "huashu.tex.tera",
                 include_str!("../../templates/huashu.tex.tera"),
             ),
-            (
-                "mcm.tex.tera",
-                include_str!("../../templates/mcm.tex.tera"),
-            ),
+            ("mcm.tex.tera", include_str!("../../templates/mcm.tex.tera")),
         ])
         .expect("bundled Tera templates parse");
         t.register_filter("latex_escape", latex_escape_filter);
@@ -234,8 +229,8 @@ pub async fn export_paper(
     // md shortcut: no meta.json required, but we still go through path
     // resolution to produce a stable attachment filename.
     if fmt == ExportFormat::Md {
-        let paper_md = resolve_within(&canonical_run_root, &canonical_run_root.join("paper.md"))
-            .await?;
+        let paper_md =
+            resolve_within(&canonical_run_root, &canonical_run_root.join("paper.md")).await?;
         let bytes = read_capped(&paper_md).await?;
         return build_binary_response(fmt, run_id, bytes);
     }
@@ -250,9 +245,8 @@ pub async fn export_paper(
         tracing::debug!(error = %e, "read paper.meta.json");
         AppError::NotFound
     })?;
-    let meta: PaperMeta = serde_json::from_slice(&meta_bytes).map_err(|e| {
-        AppError::UnprocessableEntity(format!("paper.meta.json invalid: {e}"))
-    })?;
+    let meta: PaperMeta = serde_json::from_slice(&meta_bytes)
+        .map_err(|e| AppError::UnprocessableEntity(format!("paper.meta.json invalid: {e}")))?;
 
     // Template resolution: query override > meta competition_type > cumcm.
     let template = match q.template.as_deref() {
@@ -279,11 +273,8 @@ pub async fn export_paper(
             // Simpler path (per spec's "thought 2"): pandoc consumes the
             // already-rendered paper.md directly. Figure paths inside the md
             // are relative, so we pass --resource-path=<run_root>.
-            let paper_md = resolve_within(
-                &canonical_run_root,
-                &canonical_run_root.join("paper.md"),
-            )
-            .await?;
+            let paper_md =
+                resolve_within(&canonical_run_root, &canonical_run_root.join("paper.md")).await?;
             let docx = compile_docx(&paper_md, &canonical_run_root).await?;
             build_binary_response(fmt, run_id, docx)
         }
@@ -423,13 +414,11 @@ async fn md_to_latex(md: &str) -> Result<String, AppError> {
         md.as_bytes(),
     )
     .await?;
-    String::from_utf8(out)
-        .map_err(|e| AppError::Internal(format!("pandoc output not utf-8: {e}")))
+    String::from_utf8(out).map_err(|e| AppError::Internal(format!("pandoc output not utf-8: {e}")))
 }
 
 async fn compile_pdf(tex: &str) -> Result<Vec<u8>, AppError> {
-    let tmp = tempfile::TempDir::new()
-        .map_err(|e| AppError::Internal(format!("tempdir: {e}")))?;
+    let tmp = tempfile::TempDir::new().map_err(|e| AppError::Internal(format!("tempdir: {e}")))?;
     let tex_path = tmp.path().join("paper.tex");
     tokio::fs::write(&tex_path, tex)
         .await
@@ -450,9 +439,7 @@ async fn compile_pdf(tex: &str) -> Result<Vec<u8>, AppError> {
                 "tectonic not found on PATH; install tectonic to enable PDF export".into(),
             ));
         }
-        Ok(Err(e)) => {
-            return Err(AppError::Internal(format!("tectonic spawn: {e}")))
-        }
+        Ok(Err(e)) => return Err(AppError::Internal(format!("tectonic spawn: {e}"))),
         Err(_) => {
             return Err(AppError::Internal(
                 "tectonic compile timed out after 180s".into(),
@@ -472,8 +459,7 @@ async fn compile_pdf(tex: &str) -> Result<Vec<u8>, AppError> {
 }
 
 async fn compile_docx(paper_md: &StdPath, run_root: &StdPath) -> Result<Vec<u8>, AppError> {
-    let tmp = tempfile::TempDir::new()
-        .map_err(|e| AppError::Internal(format!("tempdir: {e}")))?;
+    let tmp = tempfile::TempDir::new().map_err(|e| AppError::Internal(format!("tempdir: {e}")))?;
     let out_path = tmp.path().join("paper.docx");
 
     let run = tokio::process::Command::new("pandoc")
@@ -514,11 +500,7 @@ async fn compile_docx(paper_md: &StdPath, run_root: &StdPath) -> Result<Vec<u8>,
 ///
 /// Maps `ENOENT` from the fork to `ServiceUnavailable` so callers can turn it
 /// into a clean 503.
-async fn spawn_with_stdin(
-    cmd: &str,
-    args: &[&str],
-    stdin: &[u8],
-) -> Result<Vec<u8>, AppError> {
+async fn spawn_with_stdin(cmd: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>, AppError> {
     use tokio::io::AsyncWriteExt;
     let mut child = match tokio::process::Command::new(cmd)
         .args(args)
@@ -547,11 +529,7 @@ async fn spawn_with_stdin(
     let output = match tokio::time::timeout(COMPILE_TIMEOUT, child.wait_with_output()).await {
         Ok(Ok(o)) => o,
         Ok(Err(e)) => return Err(AppError::Internal(format!("{cmd} wait: {e}"))),
-        Err(_) => {
-            return Err(AppError::Internal(format!(
-                "{cmd} timed out after 180s"
-            )))
-        }
+        Err(_) => return Err(AppError::Internal(format!("{cmd} timed out after 180s"))),
     };
 
     if !output.status.success() {
@@ -604,7 +582,10 @@ fn latex_escape_filter(
     value: &tera::Value,
     _args: &HashMap<String, tera::Value>,
 ) -> tera::Result<tera::Value> {
-    let s = value.as_str().map(|s| s.to_string()).unwrap_or_else(|| value.to_string());
+    let s = value
+        .as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| value.to_string());
     Ok(tera::Value::String(latex_escape(&s)))
 }
 
@@ -640,7 +621,9 @@ async fn read_capped(path: &StdPath) -> Result<Vec<u8>, AppError> {
     // The 16 MiB figures cap is unnecessarily tight for a paper PDF; we keep
     // the same order of magnitude but bump to 32 MiB for exports.
     const MAX_BYTES: u64 = 32 * 1024 * 1024;
-    let meta = tokio::fs::metadata(path).await.map_err(|_| AppError::NotFound)?;
+    let meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
     if !meta.is_file() {
         return Err(AppError::NotFound);
     }

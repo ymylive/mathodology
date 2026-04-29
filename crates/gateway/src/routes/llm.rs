@@ -40,10 +40,8 @@ pub async fn chat_completions(
     Json(body): Json<Value>,
 ) -> Result<Response, AppError> {
     // Parse the body into our canonical request. Extra fields are ignored.
-    let mut req: CanonicalRequest =
-        serde_json::from_value(body.clone()).map_err(|e| {
-            AppError::BadRequest(format!("invalid chat completion body: {e}"))
-        })?;
+    let mut req: CanonicalRequest = serde_json::from_value(body.clone())
+        .map_err(|e| AppError::BadRequest(format!("invalid chat completion body: {e}")))?;
 
     // Validate reasoning_effort: must be one of {off, low, medium, high}. Drop
     // (with a WARN) on anything else instead of failing the whole request,
@@ -256,14 +254,8 @@ fn build_forward_stream(
                         let text = chunk.delta_text.clone();
                         let model = s.served_model.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = xadd_token(
-                                &mut redis,
-                                rid,
-                                agent.as_deref(),
-                                &text,
-                                &model,
-                            )
-                            .await
+                            if let Err(e) =
+                                xadd_token(&mut redis, rid, agent.as_deref(), &text, &model).await
                             {
                                 tracing::debug!(error = %e, "token XADD failed");
                             }
@@ -340,4 +332,3 @@ async fn xadd_token(
         .await?;
     Ok(())
 }
-

@@ -101,7 +101,9 @@ async fn boot_server_with_paper(seed_meta: bool) -> (SocketAddr, TempDir, NamedT
 
     let run_id = Uuid::new_v4();
     let run_root = runs_dir.join(run_id.to_string());
-    tokio::fs::create_dir_all(&run_root).await.expect("mkdir run");
+    tokio::fs::create_dir_all(&run_root)
+        .await
+        .expect("mkdir run");
     tokio::fs::create_dir_all(run_root.join("figures"))
         .await
         .expect("mkdir figures");

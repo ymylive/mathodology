@@ -90,6 +90,10 @@ impl CanonicalResponse {
             .and_then(|m| m.as_str())
             .unwrap_or_default()
             .to_string();
-        Self { raw: v, usage, model }
+        Self {
+            raw: v,
+            usage,
+            model,
+        }
     }
 }

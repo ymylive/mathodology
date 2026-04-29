@@ -17,10 +17,7 @@ pub fn seq_key(run_id: &Uuid) -> String {
 
 /// Get the next sequence number for a run. Monotonic, global across all
 /// producers writing to `mm:events:<run_id>`.
-pub async fn next_seq(
-    redis: &mut ConnectionManager,
-    run_id: &Uuid,
-) -> redis::RedisResult<i64> {
+pub async fn next_seq(redis: &mut ConnectionManager, run_id: &Uuid) -> redis::RedisResult<i64> {
     let key = seq_key(run_id);
     redis.incr(key, 1).await
 }

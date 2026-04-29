@@ -13,9 +13,7 @@ use std::sync::Arc;
 
 use futures::stream::BoxStream;
 
-use crate::llm::canonical::{
-    CanonicalChunk, CanonicalRequest, CanonicalResponse,
-};
+use crate::llm::canonical::{CanonicalChunk, CanonicalRequest, CanonicalResponse};
 use crate::llm::providers::{ProviderAdapter, ProviderError};
 
 pub struct Router {
@@ -40,10 +38,7 @@ impl Router {
 
     /// First provider whose `supports(model)` returns true.
     pub fn resolve(&self, model: &str) -> Option<Arc<dyn ProviderAdapter>> {
-        self.providers
-            .iter()
-            .find(|p| p.supports(model))
-            .cloned()
+        self.providers.iter().find(|p| p.supports(model)).cloned()
     }
 
     #[allow(dead_code)]
@@ -93,7 +88,10 @@ impl Router {
         &self,
         req: CanonicalRequest,
     ) -> Result<
-        (String, BoxStream<'static, Result<CanonicalChunk, ProviderError>>),
+        (
+            String,
+            BoxStream<'static, Result<CanonicalChunk, ProviderError>>,
+        ),
         ProviderError,
     > {
         let primary = req.model.clone();

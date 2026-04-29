@@ -1,0 +1,30 @@
+#!/bin/sh
+# On purge: drop the service user + state dir. On plain remove: leave them
+# alone so reinstall preserves runs/ and .env.
+set -e
+
+SVC_USER=mathodology
+STATE_DIR=/var/lib/mathodology
+
+case "$1" in
+    purge)
+        if getent passwd "$SVC_USER" >/dev/null; then
+            deluser --system --quiet "$SVC_USER" || true
+        fi
+        if getent group "$SVC_USER" >/dev/null; then
+            delgroup --system --quiet "$SVC_USER" || true
+        fi
+        rm -rf "$STATE_DIR"
+        rm -f /etc/mathodology/.env
+        rmdir /etc/mathodology 2>/dev/null || true
+        ;;
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+esac
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+
+#DEBHELPER#
+exit 0

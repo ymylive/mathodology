@@ -19,7 +19,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 axum = { workspace = true }
 axum-extra = { version = "0.9", features = ["query", "typed-header"] }
 tower = { workspace = true }
-tower-http = { workspace = true }
+tower-http = { workspace = true, features = ["cors", "trace", "fs"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 futures = { workspace = true }
@@ -50,3 +50,56 @@ wiremock = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
+
+# ----------------------------------------------------------------------------
+# cargo-deb metadata. Build with:
+#     cargo install cargo-deb --locked
+#     cd crates/gateway && cargo deb --no-strip
+# Output lands in target/debian/mathodology_<ver>_<arch>.deb.
+#
+# Notes:
+#   * We do NOT bundle Postgres/Redis — declared as `depends` so apt installs
+#     them, but the operator must still create the `mm` database (postinst
+#     prints the command).
+#   * Asset paths are relative to the workspace root (cargo-deb uses CARGO_MANIFEST_DIR
+#     of this crate, so we walk up with `../../`).
+#   * Debian-specific systemd units live under installer/debian/systemd/ — they
+#     point at /usr/share/mathodology paths instead of the /opt/mathodology
+#     defaults used by the upstream units. See installer/debian/postinst.
+# ----------------------------------------------------------------------------
+[package.metadata.deb]
+name = "mathodology"
+maintainer = "Mathodology contributors <https://github.com/ymylive/mathodology>"
+copyright = "2026 Mathodology contributors, MIT"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+Mathodology is a multi-process agent stack (Rust gateway + Python worker + Vue SPA) \
+for award-grade mathematical modeling write-ups. This package installs the gateway \
+binary, web SPA, worker source, migrations, and systemd units. Postgres and Redis \
+are declared as runtime dependencies but are NOT bundled; the operator must create \
+the `mm` database after install (the postinst script prints the next steps)."""
+depends = "postgresql-client, redis-tools, python3 (>= 3.11), pandoc, adduser"
+recommends = "tectonic"
+section = "science"
+priority = "optional"
+assets = [
+    ["../../target/release/gateway",                   "usr/bin/mathodology-gateway",            "755"],
+    ["../../apps/web/dist/**/*",                       "usr/share/mathodology/web/",             "644"],
+    ["../../apps/agent-worker/pyproject.toml",         "usr/share/mathodology/worker/",          "644"],
+    ["../../apps/agent-worker/README.md",              "usr/share/mathodology/worker/",          "644"],
+    ["../../apps/agent-worker/src/**/*",               "usr/share/mathodology/worker/src/",      "644"],
+    ["../../packages/py-contracts/pyproject.toml",     "usr/share/mathodology/py-contracts/",    "644"],
+    ["../../packages/py-contracts/README.md",          "usr/share/mathodology/py-contracts/",    "644"],
+    ["../../packages/py-contracts/src/**/*",           "usr/share/mathodology/py-contracts/src/", "644"],
+    ["migrations/*",                                   "usr/share/mathodology/migrations/",      "644"],
+    ["../../config/providers.toml",                    "etc/mathodology/providers.toml",         "644"],
+    ["../../.env.example",                             "etc/mathodology/.env.example",           "644"],
+    ["../../installer/debian/systemd/mathodology-gateway.service", "lib/systemd/system/mathodology-gateway.service", "644"],
+    ["../../installer/debian/systemd/mathodology-worker.service",  "lib/systemd/system/mathodology-worker.service",  "644"],
+    ["../../installer/debian/systemd/mathodology.target",          "lib/systemd/system/mathodology.target",          "644"],
+]
+conf-files = [
+    "/etc/mathodology/.env.example",
+    "/etc/mathodology/providers.toml",
+]
+maintainer-scripts = "../../installer/debian/"

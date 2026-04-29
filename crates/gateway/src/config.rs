@@ -14,6 +14,11 @@ pub struct AppConfig {
     /// (`<runs_dir>/<run_id>/figures/*.png`, `<runs_dir>/<run_id>/notebook.ipynb`).
     /// Raw value from `RUNS_DIR`; the canonicalized form lives on `AppState`.
     pub runs_dir: PathBuf,
+    /// Optional directory containing the prebuilt Vue SPA (`apps/web/dist/`).
+    /// When set and the directory exists, the gateway serves it from `/` with
+    /// SPA fallback to `index.html` so users don't need a separate static
+    /// host. Set via `STATIC_DIR`.
+    pub static_dir: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -35,6 +40,10 @@ impl AppConfig {
         let runs_dir = std::env::var("RUNS_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./runs"));
+        let static_dir = std::env::var("STATIC_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
 
         Ok(Self {
             host,
@@ -44,6 +53,7 @@ impl AppConfig {
             database_url,
             providers_path,
             runs_dir,
+            static_dir,
         })
     }
 }

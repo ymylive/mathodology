@@ -1,0 +1,73 @@
+#!/bin/sh
+# Mathodology postinst — create user, prep dirs, copy worker source to a
+# writable location, hand operator the next step. Idempotent.
+set -e
+
+SVC_USER=mathodology
+STATE_DIR=/var/lib/mathodology
+WORKER_SRC=/usr/share/mathodology/worker
+WORKER_DST="$STATE_DIR/worker"
+ENV_FILE=/etc/mathodology/.env
+ENV_EXAMPLE=/etc/mathodology/.env.example
+
+case "$1" in
+    configure)
+        # Service user (system account, no shell, home = state dir).
+        if ! getent passwd "$SVC_USER" >/dev/null; then
+            adduser --system --group --home "$STATE_DIR" --no-create-home \
+                    --shell /usr/sbin/nologin "$SVC_USER"
+        fi
+
+        mkdir -p "$STATE_DIR/runs" "$STATE_DIR/.cache" "$STATE_DIR/.local"
+
+        # Mirror worker tree to a writable location so uv can build a venv
+        # without requiring write access to /usr/share. cp -an = no-clobber,
+        # preserves attrs.
+        if [ -d "$WORKER_SRC" ]; then
+            mkdir -p "$WORKER_DST"
+            cp -an "$WORKER_SRC/." "$WORKER_DST/"
+        fi
+
+        chown -R "$SVC_USER:$SVC_USER" "$STATE_DIR"
+
+        # Seed .env on first install only — never clobber operator edits.
+        if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_EXAMPLE" ]; then
+            cp "$ENV_EXAMPLE" "$ENV_FILE"
+            chmod 0640 "$ENV_FILE"
+            chown root:"$SVC_USER" "$ENV_FILE"
+        fi
+
+        # systemd reload so freshly installed units are visible.
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+
+        cat <<EOF
+
+Mathodology installed. Next steps:
+
+  1. Edit $ENV_FILE  (set DEEPSEEK_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY,
+     and a strong DEV_AUTH_TOKEN — generate one with: openssl rand -hex 32).
+
+  2. Create the Postgres database (Postgres is a runtime dependency but is
+     NOT auto-configured):
+         sudo -u postgres psql -c "CREATE USER mm WITH PASSWORD 'mm';"
+         sudo -u postgres psql -c "CREATE DATABASE mm OWNER mm;"
+     Make sure DATABASE_URL in $ENV_FILE matches.
+
+  3. Ensure 'uv' is on PATH for the mathodology user:
+         sudo -u mathodology bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+     (or install system-wide to /usr/local/bin).
+
+  4. Start the services:
+         sudo systemctl enable --now mathodology.target
+         curl -s http://127.0.0.1:8080/health
+
+EOF
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+esac
+
+#DEBHELPER#
+exit 0

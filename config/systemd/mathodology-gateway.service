@@ -1,0 +1,39 @@
+# Mathodology gateway (Rust binary, serves API + SPA, runs sqlx migrations on start).
+[Unit]
+Description=Mathodology Gateway (HTTP API + SPA + WS)
+Documentation=https://github.com/ymylive/mathodology
+# Soft deps: gateway will retry via Restart=on-failure if pg/redis restart, no
+# need to drag the gateway down with them.
+Wants=postgresql.service redis-server.service
+After=network-online.target postgresql.service redis-server.service
+PartOf=mathodology.target
+
+[Service]
+Type=simple
+User=mathodology
+Group=mathodology
+WorkingDirectory=/opt/mathodology
+EnvironmentFile=/opt/mathodology/.env
+ExecStart=/opt/mathodology/gateway
+Restart=on-failure
+RestartSec=5s
+# Send SIGTERM, give the binary 15s to finish in-flight requests, then SIGKILL.
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+
+# --- Hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# RUNS_DIR is shared with the worker; both must be able to write here.
+ReadWritePaths=/opt/mathodology/runs
+
+[Install]
+WantedBy=multi-user.target

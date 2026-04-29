@@ -128,10 +128,227 @@ jobs:
           retention-days: 3
 
   # ---------------------------------------------------------------------
-  # 3. Assemble per-platform bundles + publish GitHub release.
+  # 3. Multi-arch Docker images → GHCR (linux/amd64 + linux/arm64).
+  #    Skipped on workflow_dispatch (manual runs are usually for testing
+  #    archives only). Triggered on tag pushes.
+  # ---------------------------------------------------------------------
+  build-docker:
+    if: github.event_name == 'push'
+    needs: [build-web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gateway
+            dockerfile: Dockerfile.gateway
+          - name: worker
+            dockerfile: Dockerfile.worker
+    steps:
+      - uses: actions/checkout@v4
+
+      # The gateway image is independent of the web bundle, but the worker
+      # COPY pulls only Python sources, so neither needs web-dist staged.
+      # We still depend on build-web for ordering — keeps the matrix tidy.
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/mathodology-${{ matrix.name }}
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest,enable=${{ !contains(steps.ver.outputs.version, '-') }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # ---------------------------------------------------------------------
+  # 4. Linux .deb via cargo-deb. Depends on the linux-x86_64 gateway build
+  #    being uploaded so we can assemble assets without rebuilding.
+  # ---------------------------------------------------------------------
+  build-deb:
+    needs: [build-web, build-gateway]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked --version '^2'
+
+      - name: Download gateway binary
+        uses: actions/download-artifact@v4
+        with:
+          name: gateway-linux-x86_64
+          path: artifacts/
+
+      - name: Download web dist
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+
+      - name: Stage prebuilt artifacts where cargo-deb expects them
+        run: |
+          mkdir -p target/release
+          cp artifacts/gateway-linux-x86_64 target/release/gateway
+          chmod +x target/release/gateway
+
+      - name: Resolve version
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build .deb
+        working-directory: crates/gateway
+        # --deb-version overrides Cargo.toml's [package].version so the
+        # .deb tracks the git tag, not the gateway crate's internal version.
+        run: cargo deb --no-build --no-strip --deb-version "${{ steps.ver.outputs.version }}"
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-x86_64
+          path: target/debian/*.deb
+          retention-days: 3
+
+  # ---------------------------------------------------------------------
+  # 5. macOS .pkg (best-effort; unsigned). Built on macos-14 for both
+  #    arm64 and x86_64 — pkgbuild itself doesn't care, but the binary
+  #    inside is per-arch, so we build one .pkg per architecture.
+  # ---------------------------------------------------------------------
+  build-pkg:
+    needs: [build-web, build-gateway]
+    runs-on: macos-14
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            platform: macos-aarch64
+          - arch: x86_64
+            platform: macos-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+        with:
+          name: gateway-${{ matrix.platform }}
+          path: artifacts/
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - name: Stage gateway binary
+        run: |
+          cp artifacts/gateway-${{ matrix.platform }} ./gateway
+          chmod +x ./gateway
+      - name: Build .pkg
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          OUTDIR: ${{ github.workspace }}/dist
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p "$OUTDIR"
+          # build-pkg.sh writes mathodology-$VERSION.pkg; rename per-arch so
+          # both matrix legs upload distinct files.
+          VERSION="$VER" OUTDIR="$OUTDIR" bash installer/macos/build-pkg.sh
+          mv "$OUTDIR/mathodology-$VER.pkg" "$OUTDIR/mathodology-$VER-${{ matrix.arch }}.pkg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: dist/mathodology-*.pkg
+          retention-days: 3
+
+  # ---------------------------------------------------------------------
+  # 6. Windows .msi via WiX 3 (best-effort; unsigned).
+  # ---------------------------------------------------------------------
+  build-msi:
+    needs: [build-web, build-gateway]
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+        with:
+          name: gateway-windows-x86_64
+          path: artifacts\
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps\web\dist
+      - name: Stage gateway.exe where build-msi.cmd expects it
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target\release | Out-Null
+          Copy-Item artifacts\gateway-windows-x86_64.exe target\release\gateway.exe
+      - name: Install WiX 3 toolset
+        shell: pwsh
+        run: |
+          choco install wixtoolset --no-progress -y
+          # Add WiX bin dir to PATH for subsequent steps.
+          $wixBin = (Get-ChildItem 'C:\Program Files (x86)\WiX Toolset *\bin' | Select-Object -Last 1).FullName
+          "$wixBin" | Out-File -Append -FilePath $env:GITHUB_PATH
+      - name: Download nssm (Windows service wrapper required by Mathodology.wxs)
+        shell: pwsh
+        run: |
+          $u = "https://nssm.cc/release/nssm-2.24.zip"
+          Invoke-WebRequest $u -OutFile nssm.zip
+          Expand-Archive nssm.zip -DestinationPath nssm-extract
+          # 64-bit binary: nssm-extract\nssm-2.24\win64\nssm.exe
+          Copy-Item nssm-extract\nssm-2.24\win64\nssm.exe installer\windows\nssm.exe
+      - name: Build .msi (heat → candle → light)
+        shell: cmd
+        env:
+          # Strip leading "v" from the tag for the WiX Version attribute.
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: installer\windows\build-msi.cmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msi-x86_64
+          path: installer\windows\mathodology-*.msi
+          retention-days: 3
+
+  # ---------------------------------------------------------------------
+  # 7. Assemble per-platform bundles + publish GitHub release.
   # ---------------------------------------------------------------------
   release:
-    needs: [build-web, build-gateway]
+    needs: [build-web, build-gateway, build-deb, build-pkg, build-msi]
+    # Native installers are best-effort (continue-on-error). Only the portable
+    # archives are blocking — release runs as long as web + gateway succeed.
+    if: ${{ always() && needs.build-web.result == 'success' && needs.build-gateway.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -165,7 +382,7 @@ jobs:
           stage_common() {
             local root="$1"
             mkdir -p "$root/apps/web" "$root/crates/gateway" \
-                     "$root/packages" "$root/config" "$root/scripts"
+                     "$root/packages" "$root/config" "$root/scripts" "$root/docs"
             # Full Python worker source + shared contracts.
             cp -R apps/agent-worker "$root/apps/"
             cp -R packages/py-contracts "$root/packages/"
@@ -174,14 +391,26 @@ jobs:
             cp -R artifacts/web-dist "$root/apps/web/dist"
             # Gateway migrations (sqlx needs them at runtime).
             cp -R crates/gateway/migrations "$root/crates/gateway/migrations"
-            # Runtime config + scripts + docs.
+            # Runtime config + service unit files.
             cp config/providers.toml "$root/config/"
+            cp -R config/systemd "$root/config/" 2>/dev/null || true
+            cp -R config/launchd "$root/config/" 2>/dev/null || true
+            cp -R config/windows "$root/config/" 2>/dev/null || true
             cp .env.example "$root/"
+            # Bundled scripts: launcher + preflight + first-time installer.
             cp scripts/release-run.sh "$root/run.sh"
             cp scripts/release-run.ps1 "$root/run.ps1"
+            cp scripts/preflight.sh   "$root/scripts/"
+            cp scripts/preflight.ps1  "$root/scripts/"
+            cp scripts/install.sh     "$root/scripts/"
+            cp scripts/install.ps1    "$root/scripts/"
+            chmod +x "$root/run.sh" "$root/scripts/preflight.sh" "$root/scripts/install.sh"
+            # Docs.
             cp README.md "$root/" 2>/dev/null || true
-            cp LICENSE "$root/" 2>/dev/null || true
-            cp docker-compose.yml "$root/" 2>/dev/null || true
+            cp LICENSE   "$root/" 2>/dev/null || true
+            cp -R docs/install "$root/docs/" 2>/dev/null || true
+            cp docker-compose.yml      "$root/" 2>/dev/null || true
+            cp docker-compose.prod.yml "$root/" 2>/dev/null || true
             # Version stamp.
             echo "$V" > "$root/VERSION"
           }
@@ -207,6 +436,13 @@ jobs:
           # Keep only archives in dist/, discard staging dirs.
           find dist -maxdepth 1 -type d -name 'mathodology-*' -exec rm -rf {} +
 
+          # Native installers: copy whatever the best-effort jobs produced.
+          # Each is optional — if a job failed, the artifact is just missing.
+          for d in artifacts/deb-x86_64 artifacts/pkg-* artifacts/msi-*; do
+            [ -d "$d" ] || continue
+            cp "$d"/* dist/ 2>/dev/null || true
+          done
+
           # Checksums.
           (cd dist && sha256sum * > SHA256SUMS.txt)
           ls -la dist
@@ -222,50 +458,71 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.deb
+            dist/*.pkg
+            dist/*.msi
             dist/SHA256SUMS.txt
           body: |
             ## Mathodology ${{ steps.ver.outputs.tag }}
 
-            Multi-platform builds of the Mathodology math-modeling agent stack.
+            Multi-platform release of the Mathodology math-modeling agent stack.
 
-            Each archive contains:
-            - `gateway` / `gateway.exe` — prebuilt Rust gateway binary
-            - `apps/agent-worker/` — Python worker (requires [uv](https://github.com/astral-sh/uv) + Python 3.11+)
-            - `apps/web/dist/` — prebuilt Vue static bundle
+            ### Pick your install path
+
+            | Platform | Portable archive | Native installer | Docker | Guide |
+            |----------|------------------|------------------|--------|-------|
+            | macOS Apple Silicon | `mathodology-*-macos-aarch64.tar.gz` | `mathodology-*.pkg` | `ghcr.io/${{ github.repository_owner }}/mathodology-{gateway,worker}:${{ steps.ver.outputs.version }}` | [docs/install/macos.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/install/macos.md) |
+            | macOS Intel | `mathodology-*-macos-x86_64.tar.gz` | `mathodology-*.pkg` | (multi-arch) | [docs/install/macos.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/install/macos.md) |
+            | Linux x86_64 | `mathodology-*-linux-x86_64.tar.gz` | `mathodology_*_amd64.deb` | `linux/amd64` | [docs/install/linux.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/install/linux.md) |
+            | Linux aarch64 | `mathodology-*-linux-aarch64.tar.gz` | (.deb amd64 only this round) | `linux/arm64` | [docs/install/linux.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/install/linux.md) |
+            | Windows | `mathodology-*-windows-x86_64.zip` | `mathodology-*.msi` | (use WSL2) | [docs/install/windows.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/install/windows.md) |
+            | Production / server | — | — | [docker-compose.prod.yml](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docker-compose.prod.yml) | [docs/install/server.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/install/server.md) |
+
+            **Native installers (`.deb` / `.pkg` / `.msi`) are unsigned and best-effort.** If they fail to build for a release, the portable archives are always available.
+
+            ### What's in each portable archive
+
+            - `gateway` / `gateway.exe` — Rust gateway binary
+            - `apps/web/dist/` — prebuilt Vue SPA (gateway hosts it via `STATIC_DIR`, no nginx required)
+            - `apps/agent-worker/` — Python worker source (needs [uv](https://github.com/astral-sh/uv) + Python 3.11+)
             - `packages/contracts/` — OpenAPI + event schemas
-            - `crates/gateway/migrations/` — sqlx migrations
-            - `config/providers.toml` — LLM provider registry
-            - `.env.example` — env template
-            - `run.sh` / `run.ps1` — one-shot bootstrap
+            - `crates/gateway/migrations/` — sqlx migrations (also embedded in the binary)
+            - `config/providers.toml`, `config/{systemd,launchd,windows}/` — runtime configs + service unit files
+            - `scripts/preflight.{sh,ps1}` — runtime prerequisite check
+            - `scripts/install.{sh,ps1}` — first-time machine setup (auto-detects brew/apt/dnf/pacman/zypper/apk/winget/scoop)
+            - `run.sh` / `run.ps1` — one-shot launcher (calls preflight, syncs worker venv, starts both processes)
+            - `docs/install/*.md` — per-platform install guides
 
-            ### Prerequisites on the host
-
-            - Redis 7+
-            - PostgreSQL 16+ with a database `mm` owned by user `mm` (password `mm` — change in production)
-            - Python 3.11+ (worker) & [uv](https://github.com/astral-sh/uv)
-            - A static web server to serve `apps/web/dist/` (any: `python -m http.server`, nginx, Caddy…)
-
-            ### Quick start
-
-            Unpack the archive for your platform, then:
+            ### Quick start (portable archive)
 
             ```bash
             # Linux / macOS
-            cp .env.example .env   # then fill in at least one *_API_KEY
-            ./run.sh
+            tar -xzf mathodology-*-linux-x86_64.tar.gz && cd mathodology-*-linux-x86_64
+            ./scripts/install.sh           # one-time, installs Postgres/Redis/uv/python/pandoc/tectonic
+            cp .env.example .env           # add at least one *_API_KEY
+            ./run.sh                       # → http://127.0.0.1:8080/
             ```
 
             ```powershell
-            # Windows PowerShell
-            Copy-Item .env.example .env  # then fill in at least one *_API_KEY
-            .\run.ps1
+            # Windows PowerShell (as admin for the install step)
+            Expand-Archive mathodology-*-windows-x86_64.zip -DestinationPath .
+            cd mathodology-*-windows-x86_64
+            .\scripts\install.ps1          # one-time, uses winget/scoop
+            Copy-Item .env.example .env    # add at least one *_API_KEY
+            .\run.ps1                      # → http://127.0.0.1:8080/
             ```
 
-            Open `http://localhost:8080/health` to confirm the gateway is up.
-            Serve `apps/web/dist/` on any static host for the UI.
+            ### Production (Docker)
+
+            ```bash
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            ```
 
             ### Verify downloads
 
             ```bash
-            sha256sum -c SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt --ignore-missing
             ```
+
+            See [docs/install/server.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/install/server.md) for hardening, backups, and observability.

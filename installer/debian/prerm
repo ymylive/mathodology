@@ -1,0 +1,17 @@
+#!/bin/sh
+# Stop the target before files vanish. Tolerate the unit not running.
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop mathodology.target 2>/dev/null || true
+            systemctl disable mathodology.target 2>/dev/null || true
+        fi
+        ;;
+    failed-upgrade)
+        ;;
+esac
+
+#DEBHELPER#
+exit 0

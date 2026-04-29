@@ -1,0 +1,8 @@
+# Group target — `systemctl restart mathodology.target` cycles both services.
+[Unit]
+Description=Mathodology (gateway + worker)
+Wants=mathodology-gateway.service mathodology-worker.service
+After=mathodology-gateway.service mathodology-worker.service
+
+[Install]
+WantedBy=multi-user.target

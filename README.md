@@ -69,28 +69,30 @@ Off-the-shelf LLM chat interfaces don't cut it — they hallucinate citations, f
 
 ## Quick start
 
+Pick the path that matches your platform — each guide covers prerequisites, three install options (portable archive / native installer / source build), and troubleshooting.
+
+| Platform | Guide | Native installer |
+|----------|-------|------------------|
+| **macOS** (Intel + Apple Silicon) | [docs/install/macos.md](docs/install/macos.md) | `.pkg` |
+| **Linux** (Debian/Ubuntu/Fedora/Arch/Alpine; x86_64 + aarch64) | [docs/install/linux.md](docs/install/linux.md) | `.deb` |
+| **Windows** 10/11 + Server 2022 | [docs/install/windows.md](docs/install/windows.md) | `.msi` |
+| **Production / Docker / systemd** | [docs/install/server.md](docs/install/server.md) | Multi-arch GHCR images |
+
+Three-line version, if you already have a working dev environment:
+
 ```bash
-# 1. Prerequisites (macOS; Linux: use your package manager)
-brew install postgresql@16 redis tectonic pandoc node
-pg_ctl -D /opt/homebrew/var/postgresql@16 -l /tmp/pg.log start
-redis-server --daemonize yes
-createuser -s mm && createdb mm -O mm                    # once
-npm install -g open-websearch                            # for MCP web search
-
-# 2. Clone + install
-git clone https://github.com/ymylive/mathodology.git
-cd mathodology
-cp .env.example .env                                     # edit with at least one LLM key
-just bootstrap                                           # cargo fetch + uv sync + pnpm install
-just migrate                                             # sqlx migrations
-
-# 3. Run
-just dev                                                 # gateway :8080 + worker + web :5173
-
-# 4. Open http://127.0.0.1:5173 → paste a problem → Run
+git clone https://github.com/ymylive/mathodology.git && cd mathodology
+cp .env.example .env                                     # edit; add at least one *_API_KEY
+./scripts/install.sh && just bootstrap && just migrate && just dev
 ```
 
-The web UI is at `:5173`. A typical CUMCM-style problem run takes about 28 minutes end-to-end and costs around ¥2 on a mid-tier reasoning model.
+`./scripts/install.sh` (and its Windows twin `scripts\install.ps1`) auto-detects your package manager (brew / apt / dnf / pacman / zypper / apk / winget / scoop) and installs Postgres, Redis, Python 3.11, uv, pandoc, and tectonic. Run `./scripts/preflight.sh` any time to verify everything is in place.
+
+A typical CUMCM-style problem run takes about 28 minutes end-to-end and costs around ¥2 on a mid-tier reasoning model.
+
+### Pre-built releases
+
+Every release ships **portable archives** (`.tar.gz` / `.zip`) for 5 targets — Linux x86_64 + aarch64, macOS x86_64 + aarch64, Windows x86_64 — plus **native installers** (`.deb`, `.pkg`, `.msi`) and **multi-arch Docker images** on GHCR. See the [latest release](https://github.com/ymylive/mathodology/releases/latest) and [docs/install/server.md](docs/install/server.md) for production deployment.
 
 ---
 
@@ -378,24 +380,26 @@ One Redis `INCR mm:seq:<run_id>` per event, shared between gateway and worker. W
 
 ## Developer setup
 
-macOS (full recipe):
+For end-user install (any of the 5 supported platforms / 4 install paths), see [Quick start](#quick-start) and the per-platform guides under [docs/install/](docs/install/). This section covers **source-build setup for contributors**.
 
 ```bash
-brew install postgresql@16 redis tectonic pandoc node@25
-pg_ctl -D /opt/homebrew/var/postgresql@16 -l /tmp/pg.log start
-redis-server --daemonize yes
-createuser -s mm && createdb mm -O mm                    # run once
-npm install -g open-websearch                            # MCP search subprocess
-
-cp .env.example .env                                     # fill in at least one LLM key
-just bootstrap                                           # installs cargo + uv + pnpm deps
-just migrate                                             # sqlx migrations
-just dev                                                 # overmind: gateway + worker + web
+git clone https://github.com/ymylive/mathodology.git && cd mathodology
+./scripts/install.sh --with-source    # adds node + pnpm on top of runtime tools
+cp .env.example .env                  # at least one *_API_KEY
+just bootstrap                        # cargo fetch + uv sync + pnpm install
+just migrate                          # sqlx migrations
+just dev                              # overmind: gateway + worker + vite dev :5173
 ```
 
-Linux: replace `brew` with your package manager. Alternatively use `just infra-up` for docker-compose Redis + Postgres instead of local services. Tectonic and Pandoc are still required on host for PDF/DOCX export — they run as subprocesses from the Rust gateway.
+`scripts/install.sh` auto-detects brew / apt / dnf / pacman / zypper / apk; on Windows use `scripts\install.ps1` (winget / scoop). Both are idempotent and prompt before any sudo action — pass `--yes` / `-Yes` for CI. `scripts/preflight.{sh,ps1}` is the verifier: `[OK]` / `[MISS]` / `[STALE]` per tool with install hints inline.
 
-First Tectonic run downloads ~200 MB of TeXLive bundle into `~/Library/Caches/Tectonic`. CI jobs should cache this directory.
+Notes that bite if skipped:
+
+- **Tectonic** downloads a ~200 MB TeXLive bundle into `~/Library/Caches/Tectonic` (macOS) or `~/.cache/Tectonic` (Linux) on first PDF render. CI must cache this directory.
+- **Pandoc + Tectonic** are runtime dependencies, called as subprocesses from the gateway during paper export. The `.deb` declares them; the portable archive doesn't.
+- **`just dev`** uses [overmind](https://github.com/DarthSim/overmind) (Linux/macOS) which depends on tmux. On Windows, run the three processes in separate terminals — see [docs/install/windows.md §4](docs/install/windows.md#4-path-c--source-build).
+
+For docker-compose Redis + Postgres instead of system services: `just infra-up`. Tectonic and Pandoc are still required on the host because they run inside the gateway/worker process, not the infra containers.
 
 ---
 

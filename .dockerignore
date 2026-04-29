@@ -1,0 +1,29 @@
+# Build artifacts
+target/
+**/node_modules/
+**/.venv/
+**/dist/
+**/__pycache__/
+**/*.pyc
+
+# Local data
+runs/
+docker-data/
+dump.rdb
+*.db
+*.sqlite*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# VCS
+.git/
+.gitignore

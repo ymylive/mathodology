@@ -1,69 +1,141 @@
-# One-shot bootstrap for a Mathodology release archive (Windows PowerShell).
+# One-shot launcher for a Mathodology release archive (Windows PowerShell 5.1+).
 #
-# Same contract as scripts/release-run.sh. Requires: uv, Redis reachable,
-# Postgres reachable, sqlx-cli (optional — otherwise migrations skipped
-# and the gateway will apply them on startup).
+# Same contract as scripts/release-run.sh. Differences from the previous
+# version (fixes):
+#   - .env parser strips quotes, ignores comments / blank lines.
+#   - No self-recursion; missing .env => copy + exit so user can fill keys.
+#   - Process management uses Wait-Job, which behaves correctly with
+#     -NoNewWindow children unlike Wait-Process+PassThru.
+#   - STATIC_DIR defaults to .\apps\web\dist so the gateway hosts the UI.
+#   - Calls scripts\preflight.ps1 if present.
+
+[CmdletBinding()]
+param()
 
 $ErrorActionPreference = "Stop"
+$ROOT = Split-Path -Parent $PSCommandPath
+Set-Location $ROOT
 
-Set-Location $PSScriptRoot
-
-# Load .env if present, else copy from .env.example.
-if (Test-Path .env) {
-    Get-Content .env | ForEach-Object {
-        if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-            [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2])
+# ---------- 1. .env loading ----------
+function Load-DotEnv($path) {
+    Get-Content -LiteralPath $path | ForEach-Object {
+        $line = $_
+        if ($line -match '^\s*#') { return }
+        if ($line -match '^\s*$') { return }
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') {
+            $k = $Matches[1]
+            $v = $Matches[2]
+            # Strip matching surrounding quotes (single or double).
+            if ($v.Length -ge 2 -and (
+                  ($v[0] -eq '"' -and $v[-1] -eq '"') -or
+                  ($v[0] -eq "'" -and $v[-1] -eq "'")
+                )) {
+                $v = $v.Substring(1, $v.Length - 2)
+            }
+            [System.Environment]::SetEnvironmentVariable($k, $v, "Process")
         }
     }
-} elseif (Test-Path .env.example) {
-    Write-Host "!! .env missing; copying from .env.example (edit to add API keys)"
-    Copy-Item .env.example .env
-    & $PSCommandPath
-    exit
 }
 
-if (-not $env:REDIS_URL)    { $env:REDIS_URL    = "redis://127.0.0.1:6379/0" }
-if (-not $env:DATABASE_URL) { $env:DATABASE_URL = "postgres://mm:mm@127.0.0.1:5432/mm" }
-if (-not $env:GATEWAY_HOST) { $env:GATEWAY_HOST = "127.0.0.1" }
-if (-not $env:GATEWAY_PORT) { $env:GATEWAY_PORT = "8080" }
-if (-not $env:RUNS_DIR)     { $env:RUNS_DIR     = Join-Path $PSScriptRoot "runs" }
-
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Error "uv not found (install from https://github.com/astral-sh/uv)"
+if (-not (Test-Path .env)) {
+    if (Test-Path .env.example) {
+        Write-Host "!! .env missing — copying from .env.example. Edit it then re-run."
+        Copy-Item .env.example .env
+        Write-Host "   At minimum, set one of DEEPSEEK_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY."
+        exit 1
+    } else {
+        Write-Error "!! .env.example also missing — corrupt archive?"
+    }
 }
+Load-DotEnv (Join-Path $ROOT ".env")
 
-Write-Host "==> syncing Python worker deps"
-Push-Location apps\agent-worker
-try { uv sync --frozen } catch { uv sync }
-Pop-Location
-
-if (Get-Command sqlx -ErrorAction SilentlyContinue) {
-    Write-Host "==> applying sqlx migrations"
-    Push-Location crates\gateway
-    sqlx migrate run --database-url $env:DATABASE_URL
-    Pop-Location
+# ---------- 2. defaults ----------
+function Default-Env([string]$key, [string]$value) {
+    if (-not [System.Environment]::GetEnvironmentVariable($key, "Process")) {
+        [System.Environment]::SetEnvironmentVariable($key, $value, "Process")
+    }
 }
+Default-Env "REDIS_URL"        "redis://127.0.0.1:6379/0"
+Default-Env "DATABASE_URL"     "postgres://mm:mm@127.0.0.1:5432/mm"
+Default-Env "GATEWAY_HOST"     "127.0.0.1"
+Default-Env "GATEWAY_PORT"     "8080"
+Default-Env "RUNS_DIR"         (Join-Path $ROOT "runs")
+Default-Env "STATIC_DIR"       (Join-Path $ROOT "apps\web\dist")
+Default-Env "DEV_AUTH_TOKEN"   "dev-local-insecure-token"
+Default-Env "GATEWAY_HTTP"     "http://$($env:GATEWAY_HOST):$($env:GATEWAY_PORT)"
 
 New-Item -ItemType Directory -Force -Path $env:RUNS_DIR | Out-Null
 
-Write-Host "==> starting gateway on $env:GATEWAY_HOST`:$env:GATEWAY_PORT"
-$gateway = Start-Process -FilePath .\gateway.exe -PassThru -NoNewWindow
+# ---------- 3. preflight ----------
+$preflight = Join-Path $ROOT "scripts\preflight.ps1"
+if (Test-Path $preflight) {
+    & $preflight
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "!! preflight reported missing prerequisites (see above)."
+        Write-Host "   Run scripts\install.ps1 to install them automatically, or fix manually."
+        exit 1
+    }
+}
+
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Error "!! uv not found. Install: irm https://astral.sh/uv/install.ps1 | iex"
+}
+
+# ---------- 4. worker venv ----------
+Write-Host "==> uv sync (worker)"
+Push-Location apps\agent-worker
+try {
+    & uv sync --frozen 2>$null
+    if ($LASTEXITCODE -ne 0) { & uv sync }
+    if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
+} finally {
+    Pop-Location
+}
+
+# ---------- 5. start ----------
+$gatewayBin = Join-Path $ROOT "gateway.exe"
+if (-not (Test-Path $gatewayBin)) {
+    Write-Error "!! gateway.exe not found at $gatewayBin"
+}
+
+Write-Host "==> starting gateway on http://$($env:GATEWAY_HOST):$($env:GATEWAY_PORT)"
+$gatewayJob = Start-Job -ScriptBlock {
+    param($bin, $envVars)
+    foreach ($k in $envVars.Keys) {
+        [System.Environment]::SetEnvironmentVariable($k, $envVars[$k], "Process")
+    }
+    & $bin
+} -ArgumentList $gatewayBin, ([Environment]::GetEnvironmentVariables("Process"))
 
 Write-Host "==> starting worker"
-Push-Location apps\agent-worker
-$worker = Start-Process -FilePath uv -ArgumentList "run","python","-m","agent_worker" -PassThru -NoNewWindow
-Pop-Location
+$workerJob = Start-Job -ScriptBlock {
+    param($wd, $envVars)
+    foreach ($k in $envVars.Keys) {
+        [System.Environment]::SetEnvironmentVariable($k, $envVars[$k], "Process")
+    }
+    Set-Location $wd
+    & uv run python -m agent_worker
+} -ArgumentList (Join-Path $ROOT "apps\agent-worker"), ([Environment]::GetEnvironmentVariables("Process"))
 
 Write-Host ""
-Write-Host "Mathodology stack is up."
-Write-Host "  Gateway  http://$($env:GATEWAY_HOST):$($env:GATEWAY_PORT)"
-Write-Host "  UI dist  apps\web\dist  (serve with any static host)"
+Write-Host "Mathodology is up."
+Write-Host "  UI       http://$($env:GATEWAY_HOST):$($env:GATEWAY_PORT)/"
+Write-Host "  Gateway  http://$($env:GATEWAY_HOST):$($env:GATEWAY_PORT)/health"
+Write-Host "  Auth     Bearer $($env:DEV_AUTH_TOKEN)  (dev token; CHANGE in production)"
 Write-Host ""
-Write-Host "Ctrl-C to stop."
+Write-Host "Press Ctrl-C to stop."
 
+# Stream both jobs' output until either dies; SIGINT triggers finally.
 try {
-    Wait-Process -Id $gateway.Id, $worker.Id
+    while ($true) {
+        Receive-Job -Job $gatewayJob
+        Receive-Job -Job $workerJob
+        if ($gatewayJob.State -ne "Running" -or $workerJob.State -ne "Running") { break }
+        Start-Sleep -Milliseconds 500
+    }
+    Write-Host "!! one of the services exited; tearing down the other"
 } finally {
-    Stop-Process -Id $gateway.Id -ErrorAction SilentlyContinue
-    Stop-Process -Id $worker.Id -ErrorAction SilentlyContinue
+    Stop-Job -Job $gatewayJob, $workerJob -ErrorAction SilentlyContinue
+    Receive-Job -Job $gatewayJob, $workerJob -ErrorAction SilentlyContinue
+    Remove-Job -Job $gatewayJob, $workerJob -Force -ErrorAction SilentlyContinue
 }

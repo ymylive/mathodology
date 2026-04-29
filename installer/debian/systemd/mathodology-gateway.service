@@ -1,0 +1,37 @@
+# Mathodology gateway — Debian package variant.
+# Layout: /usr/bin/mathodology-gateway, /etc/mathodology/.env, runs in /var/lib/mathodology.
+[Unit]
+Description=Mathodology Gateway (HTTP API + SPA + WS)
+Documentation=https://github.com/ymylive/mathodology
+Wants=postgresql.service redis-server.service
+After=network-online.target postgresql.service redis-server.service
+PartOf=mathodology.target
+
+[Service]
+Type=simple
+User=mathodology
+Group=mathodology
+WorkingDirectory=/var/lib/mathodology
+EnvironmentFile=/etc/mathodology/.env
+Environment=STATIC_DIR=/usr/share/mathodology/web
+Environment=RUNS_DIR=/var/lib/mathodology/runs
+ExecStart=/usr/bin/mathodology-gateway
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/mathodology
+
+[Install]
+WantedBy=multi-user.target

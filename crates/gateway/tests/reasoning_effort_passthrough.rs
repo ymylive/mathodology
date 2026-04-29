@@ -91,6 +91,7 @@ async fn build_state(providers_path: PathBuf) -> AppState {
         database_url,
         providers_path: providers_path.clone(),
         runs_dir: runs_dir.clone(),
+        static_dir: None,
     };
     let llm =
         LlmContext::bootstrap(&providers_path).expect("LlmContext::bootstrap");

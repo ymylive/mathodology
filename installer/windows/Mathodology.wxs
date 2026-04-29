@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mathodology Windows installer (WiX 3.x).
+
+  Build (CI):
+      heat dir ..\..\apps\web\dist     -cg WebDistGroup    -gg -srd -dr WEBDIR    -var var.WebDistSrc    -out auto-web.wxs
+      heat dir ..\..\apps\agent-worker -cg WorkerGroup     -gg -srd -dr WORKERDIR -var var.WorkerSrc     -out auto-worker.wxs
+      heat dir ..\..\packages\py-contracts -cg PyContractsGroup -gg -srd -dr PYCDIR -var var.PyContractsSrc -out auto-pycontracts.wxs
+      candle Mathodology.wxs auto-web.wxs auto-worker.wxs auto-pycontracts.wxs ^
+             -dWebDistSrc=..\..\apps\web\dist ^
+             -dWorkerSrc=..\..\apps\agent-worker ^
+             -dPyContractsSrc=..\..\packages\py-contracts
+      light  -ext WixUIExtension -ext WixUtilExtension ^
+             Mathodology.wixobj auto-web.wixobj auto-worker.wixobj auto-pycontracts.wixobj ^
+             -o mathodology-%VERSION%.msi
+
+  *** UpgradeCode MUST NOT CHANGE ACROSS RELEASES. ***
+  Generated once and frozen here. Changing it makes new MSIs install
+  side-by-side with old ones instead of upgrading them.
+
+  This MSI is UNSIGNED. SmartScreen will warn on download. We have no
+  Authenticode certificate. Sign in CI with `signtool sign` if/when one
+  becomes available.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <Product Id="*"
+           Name="Mathodology"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="Mathodology contributors"
+           UpgradeCode="3F6B1B5C-2C9E-4F5E-8B71-5E9D7A0E8F11">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="Mathodology — agent-driven mathematical modeling write-ups"
+             Comments="Unsigned community build. SmartScreen may warn." />
+
+    <!-- Major-upgrade rule: when a newer version is installed, the older one
+         is removed first. AllowSameVersionUpgrades helps during dev. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of Mathodology is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Single all-or-nothing feature. Bundles everything; if we ever want a
+         "minimal" choice we'd add more <Feature> nodes referencing component
+         subsets. -->
+    <Feature Id="Complete" Title="Mathodology" Level="1" Display="expand">
+      <ComponentGroupRef Id="MainComponents" />
+      <ComponentGroupRef Id="MigrationsGroup" />
+      <ComponentGroupRef Id="WebDistGroup" />
+      <ComponentGroupRef Id="WorkerGroup" />
+      <ComponentGroupRef Id="PyContractsGroup" />
+      <ComponentGroupRef Id="StartMenuShortcuts" />
+      <ComponentGroupRef Id="PathEntry" />
+    </Feature>
+
+    <!-- License RTF (a stub MIT in license.rtf is shipped; CI may regenerate
+         from /LICENSE if desired). -->
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+    <UIRef Id="WixUI_InstallDir" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+
+    <!-- Layout. INSTALLDIR defaults to %ProgramFiles%\Mathodology and is
+         settable on the command line: msiexec /i mathodology.msi INSTALLDIR=D:\foo -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="Mathodology">
+          <Directory Id="WEBROOT" Name="apps">
+            <Directory Id="WEBAPPS" Name="web">
+              <Directory Id="WEBDIR" Name="dist" />
+            </Directory>
+            <Directory Id="WORKERDIR" Name="agent-worker" />
+          </Directory>
+          <Directory Id="PACKAGESDIR" Name="packages">
+            <Directory Id="PYCDIR" Name="py-contracts" />
+          </Directory>
+          <Directory Id="MIGRATIONSDIR" Name="migrations" />
+          <Directory Id="SCRIPTSDIR" Name="scripts" />
+          <Directory Id="BINDIR" Name="bin" />
+        </Directory>
+      </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Mathodology" />
+      </Directory>
+    </Directory>
+
+    <!-- Hand-listed components (small, stable set). Heat-generated component
+         groups (WebDistGroup / WorkerGroup / PyContractsGroup) cover the
+         large fan-out trees and live in auto-*.wxs. -->
+    <ComponentGroup Id="MainComponents" Directory="INSTALLDIR">
+      <Component Id="GatewayExe" Guid="*">
+        <File Id="GatewayExe" Source="..\..\target\release\gateway.exe" KeyPath="yes" Name="gateway.exe" />
+      </Component>
+
+      <Component Id="ProvidersToml" Guid="*">
+        <File Id="ProvidersToml" Source="..\..\config\providers.toml" KeyPath="yes" Name="providers.toml" />
+      </Component>
+
+      <Component Id="EnvExample" Guid="*">
+        <File Id="EnvExample" Source="..\..\.env.example" KeyPath="yes" Name=".env.example" />
+        <!-- Seed .env from .env.example on first install, never on upgrade.
+             NEVER replaces an existing .env (NEVER) so operator edits survive. -->
+        <CopyFile Id="SeedEnvFile"
+                  SourceProperty="INSTALLDIR"
+                  SourceName=".env.example"
+                  DestinationProperty="INSTALLDIR"
+                  DestinationName=".env" />
+      </Component>
+
+      <Component Id="ReleaseRunPs1" Guid="*">
+        <File Id="ReleaseRunPs1" Source="..\..\scripts\release-run.ps1" KeyPath="yes" Name="release-run.ps1" />
+      </Component>
+
+      <Component Id="InstallServicePs1" Guid="*">
+        <File Id="InstallServicePs1" Source="..\..\config\windows\install-service.ps1" KeyPath="yes" Name="install-service.ps1" />
+      </Component>
+
+      <Component Id="UninstallServicePs1" Guid="*">
+        <File Id="UninstallServicePs1" Source="..\..\config\windows\uninstall-service.ps1" KeyPath="yes" Name="uninstall-service.ps1" />
+      </Component>
+
+      <!-- NSSM is side-loaded by CI (downloaded from nssm.cc into installer\windows\nssm.exe
+           before light.exe runs). Service registration uses it. -->
+      <Component Id="NssmExe" Guid="*">
+        <File Id="NssmExe" Source="nssm.exe" KeyPath="yes" Name="nssm.exe" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Migrations: small enough to enumerate by hand. -->
+    <ComponentGroup Id="MigrationsGroup" Directory="MIGRATIONSDIR">
+      <Component Id="Mig0001" Guid="*">
+        <File Id="Mig0001" Source="..\..\crates\gateway\migrations\0001_runs.up.sql" KeyPath="yes" />
+      </Component>
+      <Component Id="Mig0002" Guid="*">
+        <File Id="Mig0002" Source="..\..\crates\gateway\migrations\0002_events_audit.up.sql" KeyPath="yes" />
+      </Component>
+      <Component Id="Mig0003" Guid="*">
+        <File Id="Mig0003" Source="..\..\crates\gateway\migrations\0003_cost_ledger.up.sql" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Start Menu: link to release-run + a "Open UI" shortcut.
+         Per WiX rules, every Start Menu shortcut needs a RegistryValue keypath
+         (LocalMachine\Software\<Manufacturer>\<Product>) so MSI can track it. -->
+    <ComponentGroup Id="StartMenuShortcuts" Directory="ApplicationProgramsFolder">
+      <Component Id="StartMenuRun" Guid="*">
+        <Shortcut Id="StartShortcut"
+                  Name="Mathodology — Start"
+                  Description="Run the Mathodology gateway + worker"
+                  Target="[#ReleaseRunPs1]"
+                  WorkingDirectory="INSTALLDIR" />
+        <RemoveFolder Id="RemoveAppShortcuts" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Mathodology\Mathodology"
+                       Name="StartShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="StartMenuOpenUI" Guid="*">
+        <Shortcut Id="OpenUIShortcut"
+                  Name="Mathodology — Open UI"
+                  Description="Open the Mathodology UI in the default browser"
+                  Target="[System64Folder]cmd.exe"
+                  Arguments="/c start http://localhost:8080"
+                  WorkingDirectory="INSTALLDIR" />
+        <RegistryValue Root="HKCU" Key="Software\Mathodology\Mathodology"
+                       Name="OpenUIShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- PATH amendment via util:EnvironmentVariable. Action=set + Part=last
+         appends if not present, no-op otherwise. Removed on uninstall. -->
+    <ComponentGroup Id="PathEntry" Directory="INSTALLDIR">
+      <Component Id="EnvPath" Guid="A8E8C4D2-7B3F-4E91-9A6E-8D2B5F7E1C30">
+        <util:EnvironmentVariable Id="MathodologyPath"
+                                  Name="PATH"
+                                  Value="[INSTALLDIR]"
+                                  Permanent="no"
+                                  Part="last"
+                                  Action="set"
+                                  System="yes" />
+        <RegistryValue Root="HKLM" Key="Software\Mathodology\Mathodology"
+                       Name="PathEntry" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+  </Product>
+</Wix>

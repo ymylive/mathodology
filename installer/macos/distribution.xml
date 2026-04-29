@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Distribution xml for productbuild. @@VERSION@@ and @@COMPONENT_PKG@@ are
+  substituted by build-pkg.sh. Single-payload, no choices UI.
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>Mathodology</title>
+    <organization>com.mathodology</organization>
+    <welcome    file="welcome.txt"    mime-type="text/plain"/>
+    <readme     file="readme.txt"     mime-type="text/plain"/>
+    <license    file="license.txt"    mime-type="text/plain"/>
+    <options customize="never" require-scripts="true" hostArchitectures="arm64,x86_64"/>
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="11.0"/>
+        </allowed-os-versions>
+    </volume-check>
+    <choices-outline>
+        <line choice="default"/>
+    </choices-outline>
+    <choice id="default" title="Mathodology" visible="false">
+        <pkg-ref id="com.mathodology.pkg"/>
+    </choice>
+    <pkg-ref id="com.mathodology.pkg"
+             version="@@VERSION@@"
+             onConclusion="none">@@COMPONENT_PKG@@</pkg-ref>
+</installer-gui-script>

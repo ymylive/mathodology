@@ -1,0 +1,43 @@
+# Mathodology agent worker (Python, uv-managed venv, consumes Redis Streams).
+[Unit]
+Description=Mathodology Agent Worker (Redis Streams consumer)
+Documentation=https://github.com/ymylive/mathodology
+Wants=postgresql.service redis-server.service
+After=network-online.target postgresql.service redis-server.service mathodology-gateway.service
+PartOf=mathodology.target
+
+[Service]
+Type=simple
+User=mathodology
+Group=mathodology
+WorkingDirectory=/opt/mathodology/apps/agent-worker
+EnvironmentFile=/opt/mathodology/.env
+# `uv` must be on PATH for the mathodology user. Install per-user:
+#   sudo -u mathodology bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+# or system-wide to /usr/local/bin (recommended for headless installs).
+# /usr/bin/env resolves uv via the inherited PATH; we extend PATH below to
+# include the typical user-local install location.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/mathodology/.local/bin
+ExecStart=/usr/bin/env uv run python -m agent_worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# --- Hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Worker writes notebook.ipynb + figures here; uv also caches under
+# ~/.cache/uv (covered by allowing the home dir below via ReadWritePaths).
+ReadWritePaths=/opt/mathodology/runs /opt/mathodology/apps/agent-worker /home/mathodology
+
+[Install]
+WantedBy=multi-user.target

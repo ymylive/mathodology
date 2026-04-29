@@ -1,5 +1,6 @@
 use axum::routing::{get, post};
 use axum::Router;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 use crate::auth::require_dev_token;
@@ -36,8 +37,25 @@ pub fn build_router(state: AppState) -> Router {
     // Public routes: /health only.
     let public = Router::new().route("/health", get(health::health));
 
-    public
-        .merge(authed)
-        .with_state(state)
-        .layer(TraceLayer::new_for_http())
+    let mut router = public.merge(authed).with_state(state.clone());
+
+    // If STATIC_DIR points at a usable Vue build, mount it as a fallback so
+    // unmatched paths serve the SPA. Lets a single binary host the UI without
+    // a separate nginx/caddy. SPA fallback to index.html is required for
+    // client-side routing.
+    if let Some(dir) = state.config.static_dir.as_ref() {
+        if dir.is_dir() {
+            let index = dir.join("index.html");
+            let serve = ServeDir::new(dir).fallback(ServeFile::new(index));
+            router = router.fallback_service(serve);
+            tracing::info!(path = %dir.display(), "static UI mounted at /");
+        } else {
+            tracing::warn!(
+                path = %dir.display(),
+                "STATIC_DIR set but directory missing — UI will not be served"
+            );
+        }
+    }
+
+    router.layer(TraceLayer::new_for_http())
 }

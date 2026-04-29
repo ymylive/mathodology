@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mathodology gateway launchd unit.
+  EnvironmentVariables here is intentionally minimal — the wrapper script
+  loads .env so it remains the single source of truth.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mathodology.gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/mathodology/bin/launchd-exec.sh</string>
+        <string>gateway</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/usr/local/mathodology</string>
+
+    <!-- Run as a real user (not root). Create with: sudo dscl . -create
+         /Users/_mathodology UserShell /usr/bin/false  (see install.sh) -->
+    <key>UserName</key>
+    <string>_mathodology</string>
+    <key>GroupName</key>
+    <string>_mathodology</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- KeepAlive: restart if it crashes, but not on clean exit (i.e. when
+         the operator runs `launchctl bootout`). SuccessfulExit=false means
+         "do NOT keep alive on a clean exit". -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <!-- Throttle restart loop so a hard-failing process doesn't burn CPU. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/usr/local/mathodology/logs/gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>/usr/local/mathodology/logs/gateway.err</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

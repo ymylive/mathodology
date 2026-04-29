@@ -1,0 +1,95 @@
+#!/bin/bash
+# Mathodology macOS postinstall — wires up directories, launchd units,
+# prints next steps. Idempotent. Runs as root via Installer.app.
+set -e
+
+PREFIX=/usr/local/mathodology
+SVC_USER=_mathodology
+DAEMONS=/Library/LaunchDaemons
+
+mkdir -p "$PREFIX/logs" "$PREFIX/runs" "$PREFIX/bin"
+
+# Service user (idempotent). dscl is the macOS equivalent of useradd.
+if ! dscl . -read "/Users/$SVC_USER" >/dev/null 2>&1; then
+    NEXT_UID=$(dscl . -list /Users UniqueID | awk '$2 < 500 {print $2}' | sort -n | tail -1)
+    NEXT_UID=$((NEXT_UID + 1))
+    dscl . -create "/Users/$SVC_USER"
+    dscl . -create "/Users/$SVC_USER" UserShell /usr/bin/false
+    dscl . -create "/Users/$SVC_USER" RealName "Mathodology Service"
+    dscl . -create "/Users/$SVC_USER" UniqueID "$NEXT_UID"
+    dscl . -create "/Users/$SVC_USER" PrimaryGroupID 20
+    dscl . -create "/Users/$SVC_USER" NFSHomeDirectory /var/empty
+fi
+
+# Seed .env on first install only.
+if [ ! -f "$PREFIX/.env" ] && [ -f "$PREFIX/.env.example" ]; then
+    cp "$PREFIX/.env.example" "$PREFIX/.env"
+    chmod 0640 "$PREFIX/.env"
+fi
+
+# Wrapper script identical in spirit to config/launchd/install.sh's wrapper —
+# launchd plist points at this so .env stays the single source of truth.
+cat > "$PREFIX/bin/launchd-exec.sh" <<'WRAP'
+#!/usr/bin/env bash
+set -euo pipefail
+INSTALL_DIR=/usr/local/mathodology
+cd "$INSTALL_DIR"
+
+set -a
+. <(tr -d '\r' < "$INSTALL_DIR/.env")
+set +a
+
+: "${RUNS_DIR:=$INSTALL_DIR/runs}"
+: "${STATIC_DIR:=$INSTALL_DIR/apps/web/dist}"
+: "${GATEWAY_HOST:=127.0.0.1}"
+: "${GATEWAY_PORT:=8080}"
+: "${GATEWAY_HTTP:=http://${GATEWAY_HOST}:${GATEWAY_PORT}}"
+export RUNS_DIR STATIC_DIR GATEWAY_HOST GATEWAY_PORT GATEWAY_HTTP
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+case "${1:-}" in
+    gateway) exec "$INSTALL_DIR/gateway" ;;
+    worker)  cd "$INSTALL_DIR/apps/agent-worker"; exec uv run python -m agent_worker ;;
+    *) echo "usage: $0 {gateway|worker}" >&2; exit 64 ;;
+esac
+WRAP
+chmod 0755 "$PREFIX/bin/launchd-exec.sh"
+
+chown -R root:wheel "$PREFIX"
+# logs/runs need to be writable by the service account.
+chown -R "$SVC_USER:staff" "$PREFIX/logs" "$PREFIX/runs"
+
+# Bootstrap launchd. bootout first so a re-install picks up new plists; ignore
+# failure to stay idempotent when nothing was previously loaded.
+for unit in com.mathodology.gateway com.mathodology.worker; do
+    launchctl bootout system "$DAEMONS/$unit.plist" 2>/dev/null || true
+    launchctl bootstrap system "$DAEMONS/$unit.plist" || \
+        echo "!! launchctl bootstrap $unit failed (already loaded?)"
+done
+
+cat <<EOF
+
+Mathodology installed at $PREFIX.
+
+Next steps:
+  1. Edit $PREFIX/.env  (set DEEPSEEK_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY,
+     and a strong DEV_AUTH_TOKEN; default 'dev-local-insecure-token' is unsafe).
+
+  2. Install Postgres + Redis (NOT bundled):
+         brew install postgresql@16 redis
+         brew services start postgresql@16
+         brew services start redis
+         createuser -s mm && createdb -O mm mm
+
+  3. Install uv for the worker:
+         curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  4. Kick the services:
+         sudo launchctl kickstart -k system/com.mathodology.gateway
+         sudo launchctl kickstart -k system/com.mathodology.worker
+         curl -s http://127.0.0.1:8080/health
+
+Logs: $PREFIX/logs/{gateway,worker}.{log,err}
+EOF
+
+exit 0

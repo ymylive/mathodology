@@ -1,0 +1,101 @@
+name: mathodology
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  mm:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mm}
+      POSTGRES_DB: ${POSTGRES_DB:-mm}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mm} -d ${POSTGRES_DB:-mm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [mm]
+
+  redis:
+    image: redis:7-alpine
+    <<: *restart
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [mm]
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    <<: *restart
+    env_file: [.env]
+    environment:
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8080
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgres://${POSTGRES_USER:-mm}:${POSTGRES_PASSWORD:-mm}@postgres:5432/${POSTGRES_DB:-mm}
+      RUNS_DIR: /data/runs
+      # SPA is served by caddy, not the gateway.
+      STATIC_DIR: ""
+    volumes:
+      - ./runs:/data/runs
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    networks: [mm]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    <<: *restart
+    env_file: [.env]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgres://${POSTGRES_USER:-mm}:${POSTGRES_PASSWORD:-mm}@postgres:5432/${POSTGRES_DB:-mm}
+      GATEWAY_HTTP: http://gateway:8080
+      RUNS_DIR: /data/runs
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./runs:/data/runs
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      gateway:  { condition: service_healthy }
+    networks: [mm]
+
+  web:
+    image: caddy:2-alpine
+    <<: *restart
+    volumes:
+      - ./apps/web/dist:/srv:ro
+      - ./config/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "8081:80"
+    depends_on:
+      gateway: { condition: service_healthy }
+    networks: [mm]

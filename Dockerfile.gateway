@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+
+# ---- builder ----
+FROM --platform=$BUILDPLATFORM rust:1.83-slim-bookworm AS builder
+ENV CARGO_TERM_COLOR=always DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+# Copy the full workspace; Cargo needs every member's manifest to resolve.
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+
+# Release build of just the gateway binary.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --bin gateway \
+ && cp /src/target/release/gateway /usr/local/bin/gateway
+
+# ---- runtime ----
+# bookworm-slim (not distroless) so HEALTHCHECK can shell out to wget and so
+# operators can `docker exec` for triage. Final image ~70MB.
+FROM debian:bookworm-slim AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 1000 --home /app --shell /usr/sbin/nologin app \
+    && mkdir -p /app /data/runs /app/config /app/migrations \
+    && chown -R app:app /app /data
+
+WORKDIR /app
+COPY --from=builder /usr/local/bin/gateway /usr/local/bin/gateway
+# providers.toml is loaded at runtime via PROVIDERS_PATH (default config/providers.toml).
+COPY --chown=app:app config/providers.toml /app/config/providers.toml
+# Migrations are also embedded in the binary via sqlx::migrate! macro; shipped here
+# for inspection and for any future runtime-migrate path.
+COPY --chown=app:app crates/gateway/migrations /app/migrations
+
+USER app
+ENV GATEWAY_HOST=0.0.0.0 \
+    GATEWAY_PORT=8080 \
+    RUNS_DIR=/data/runs \
+    PROVIDERS_PATH=/app/config/providers.toml
+
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/gateway"]

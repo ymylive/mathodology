@@ -1,0 +1,43 @@
+# Mathodology worker — Debian package variant.
+# Worker source ships read-only under /usr/share/mathodology/worker; uv venv +
+# caches live under /var/lib/mathodology so the read-only ProtectSystem=strict
+# stays honest.
+[Unit]
+Description=Mathodology Agent Worker (Redis Streams consumer)
+Documentation=https://github.com/ymylive/mathodology
+Wants=postgresql.service redis-server.service
+After=network-online.target postgresql.service redis-server.service mathodology-gateway.service
+PartOf=mathodology.target
+
+[Service]
+Type=simple
+User=mathodology
+Group=mathodology
+WorkingDirectory=/var/lib/mathodology/worker
+EnvironmentFile=/etc/mathodology/.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/var/lib/mathodology/.local/bin
+Environment=UV_CACHE_DIR=/var/lib/mathodology/.cache/uv
+Environment=RUNS_DIR=/var/lib/mathodology/runs
+# postinst syncs /usr/share/mathodology/worker -> /var/lib/mathodology/worker
+# so uv can write its venv next to pyproject.toml without violating
+# ProtectSystem=strict.
+ExecStart=/usr/bin/env uv run python -m agent_worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/mathodology
+
+[Install]
+WantedBy=multi-user.target

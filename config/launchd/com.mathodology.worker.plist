@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mathodology agent worker launchd unit.
+  Same wrapper pattern as the gateway plist — see comment there.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mathodology.worker</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/mathodology/bin/launchd-exec.sh</string>
+        <string>worker</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/usr/local/mathodology/apps/agent-worker</string>
+
+    <key>UserName</key>
+    <string>_mathodology</string>
+    <key>GroupName</key>
+    <string>_mathodology</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/usr/local/mathodology/logs/worker.log</string>
+    <key>StandardErrorPath</key>
+    <string>/usr/local/mathodology/logs/worker.err</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

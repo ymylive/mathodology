@@ -69,28 +69,30 @@
 
 ## 快速开始
 
+挑选你平台对应的安装指南 —— 每份都覆盖前置依赖、3 种安装路径（便携包 / 原生安装器 / 源码构建）和故障排查。
+
+| 平台 | 指南 | 原生安装器 |
+|------|------|-----------|
+| **macOS**（Intel + Apple Silicon） | [docs/install/macos.md](docs/install/macos.md) | `.pkg` |
+| **Linux**（Debian/Ubuntu/Fedora/Arch/Alpine；x86_64 + aarch64） | [docs/install/linux.md](docs/install/linux.md) | `.deb` |
+| **Windows** 10/11 + Server 2022 | [docs/install/windows.md](docs/install/windows.md) | `.msi` |
+| **生产 / Docker / systemd** | [docs/install/server.md](docs/install/server.md) | 多架构 GHCR 镜像 |
+
+如果你已经有可用的开发环境，三行版：
+
 ```bash
-# 1. 依赖（macOS；Linux 用各自的包管理器）
-brew install postgresql@16 redis tectonic pandoc node
-pg_ctl -D /opt/homebrew/var/postgresql@16 -l /tmp/pg.log start
-redis-server --daemonize yes
-createuser -s mm && createdb mm -O mm                    # 只跑一次
-npm install -g open-websearch                            # MCP web 搜索子进程
-
-# 2. 克隆 + 装依赖
-git clone https://github.com/ymylive/mathodology.git
-cd mathodology
-cp .env.example .env                                     # 至少填一个 LLM key
-just bootstrap                                           # cargo fetch + uv sync + pnpm install
-just migrate                                             # sqlx 数据库迁移
-
-# 3. 跑
-just dev                                                 # gateway :8080 + worker + web :5173
-
-# 4. 打开 http://127.0.0.1:5173 → 粘贴题目 → Run
+git clone https://github.com/ymylive/mathodology.git && cd mathodology
+cp .env.example .env                                     # 至少填一个 *_API_KEY
+./scripts/install.sh && just bootstrap && just migrate && just dev
 ```
 
+`./scripts/install.sh`（Windows 用 `scripts\install.ps1`）会自动识别系统包管理器（brew / apt / dnf / pacman / zypper / apk / winget / scoop）并安装 Postgres、Redis、Python 3.11、uv、pandoc、tectonic。任何时候都可以跑 `./scripts/preflight.sh` 检查环境。
+
 典型 CUMCM 风格的题目跑完大约 28 分钟，中端 reasoning 模型上约 ¥2 成本。
+
+### 预编译发布包
+
+每个 release 都会发：5 个目标的**便携归档**（`.tar.gz` / `.zip`，Linux x86_64 + aarch64 / macOS x86_64 + aarch64 / Windows x86_64）+ **原生安装器**（`.deb`、`.pkg`、`.msi`）+ 多架构 **Docker 镜像**（GHCR）。见 [latest release](https://github.com/ymylive/mathodology/releases/latest) 与 [docs/install/server.md](docs/install/server.md)。
 
 ---
 
@@ -378,24 +380,26 @@ math_agent/
 
 ## 开发者搭建
 
-macOS（完整流程）：
+终端用户安装见 [快速开始](#快速开始) 和 [docs/install/](docs/install/) 下的各平台指南。本节专门给**贡献者源码搭建**用。
 
 ```bash
-brew install postgresql@16 redis tectonic pandoc node@25
-pg_ctl -D /opt/homebrew/var/postgresql@16 -l /tmp/pg.log start
-redis-server --daemonize yes
-createuser -s mm && createdb mm -O mm                    # 只跑一次
-npm install -g open-websearch                            # MCP 搜索子进程
-
-cp .env.example .env                                     # 至少填一个 LLM key
-just bootstrap                                           # cargo + uv + pnpm 依赖全装
-just migrate                                             # sqlx 迁移
-just dev                                                 # overmind: gateway + worker + web
+git clone https://github.com/ymylive/mathodology.git && cd mathodology
+./scripts/install.sh --with-source    # 在运行时依赖之上加装 node + pnpm
+cp .env.example .env                  # 至少填一个 *_API_KEY
+just bootstrap                        # cargo fetch + uv sync + pnpm install
+just migrate                          # sqlx 迁移
+just dev                              # overmind: gateway + worker + vite dev :5173
 ```
 
-Linux：把 `brew` 换成你的包管理器。或者用 `just infra-up` 跑 docker-compose 的 Redis + Postgres 替代本地服务。Tectonic 和 Pandoc 仍要求装在宿主上 — 它们作为 subprocess 被 Rust 网关调用。
+`scripts/install.sh` 会自动识别 brew / apt / dnf / pacman / zypper / apk；Windows 用 `scripts\install.ps1`（winget / scoop）。两者都是幂等的，sudo 操作前会提示确认 —— CI 用 `--yes` / `-Yes` 跳过。`scripts/preflight.{sh,ps1}` 是验证器：每个工具给 `[OK]` / `[MISS]` / `[STALE]` 并附上修复命令。
 
-Tectonic 首次运行会下载 ~200 MB 的 TeXLive bundle 到 `~/Library/Caches/Tectonic`。CI job 应该缓存这个目录。
+容易踩的坑：
+
+- **Tectonic** 首次渲染 PDF 会下载 ~200 MB 的 TeXLive bundle 到 `~/Library/Caches/Tectonic`（macOS）或 `~/.cache/Tectonic`（Linux）。CI 必须缓存此目录。
+- **Pandoc + Tectonic** 是运行时依赖，由 gateway 在论文导出阶段以 subprocess 调用。`.deb` 已声明依赖，便携归档没有。
+- **`just dev`** 用 [overmind](https://github.com/DarthSim/overmind)（仅 Linux/macOS）依赖 tmux。Windows 上需要在三个独立终端分别启动三个进程 —— 见 [docs/install/windows.md §4](docs/install/windows.md#4-path-c--source-build)。
+
+如果想用 docker-compose 的 Redis + Postgres 代替系统服务：`just infra-up`。Tectonic 和 Pandoc 仍需要装在宿主上，因为它们运行在 gateway/worker 进程内部，而非 infra 容器里。
 
 ---
 

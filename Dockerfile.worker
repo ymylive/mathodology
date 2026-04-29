@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.11-slim-bookworm AS runtime
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    UV_VERSION=0.5.11 \
+    TECTONIC_VERSION=0.15.0 \
+    PANDOC_VERSION=3.1.11.1
+
+# pandoc apt is recent enough on bookworm; tectonic apt is 0.4 — too old, use upstream tarball.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl wget xz-utils \
+      build-essential libpq-dev \
+      pandoc \
+      fonts-dejavu fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Tectonic upstream tarball — arch-aware via TARGETARCH.
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) TT_ARCH="x86_64-unknown-linux-musl" ;; \
+      arm64) TT_ARCH="aarch64-unknown-linux-musl" ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic@${TECTONIC_VERSION}/tectonic-${TECTONIC_VERSION}-${TT_ARCH}.tar.gz"; \
+    curl -fsSL "$url" -o /tmp/tectonic.tar.gz; \
+    tar -xzf /tmp/tectonic.tar.gz -C /usr/local/bin tectonic; \
+    rm /tmp/tectonic.tar.gz; \
+    tectonic --version
+
+# uv — pinned.
+RUN pip install --no-cache-dir "uv==${UV_VERSION}"
+
+RUN useradd --system --uid 1000 --create-home --home-dir /app --shell /bin/bash app \
+ && mkdir -p /app /data/runs \
+ && chown -R app:app /app /data
+
+WORKDIR /app
+# Copy workspace manifests + lock first for layer cache.
+COPY --chown=app:app pyproject.toml uv.lock ./
+COPY --chown=app:app apps/agent-worker /app/apps/agent-worker
+COPY --chown=app:app packages/py-contracts /app/packages/py-contracts
+
+USER app
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH=/app/.venv/bin:$PATH \
+    RUNS_DIR=/data/runs \
+    PYTHONUNBUFFERED=1
+
+# Resolve from the workspace root so mm-contracts (workspace dep) is found.
+RUN uv sync --frozen --package agent-worker
+
+WORKDIR /app/apps/agent-worker
+# Exec via the synced venv directly — avoids uv re-resolving on every start.
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "agent_worker"]

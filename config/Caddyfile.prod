@@ -1,0 +1,32 @@
+# Caddy reverse-proxy for Mathodology web tier.
+# Listens on :80 inside the container; compose maps it to host :8081.
+:80 {
+    encode zstd gzip
+
+    # Backend prefixes — proxied to the gateway as-is.
+    # /runs covers both POST /runs (create) and GET /runs/:id/* (artifacts).
+    @backend {
+        path /health /runs /runs/* /llm/* /stats /stats/* \
+             /providers /providers/* /search /search/*
+    }
+    handle @backend {
+        reverse_proxy gateway:8080
+    }
+
+    # WebSocket upgrades.
+    handle /ws/* {
+        reverse_proxy gateway:8080
+    }
+
+    # /api/* convenience prefix → strip and forward.
+    handle_path /api/* {
+        reverse_proxy gateway:8080
+    }
+
+    # SPA — serve dist/, fall back to index.html for client-side routes.
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}

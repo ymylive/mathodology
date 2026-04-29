@@ -36,10 +36,13 @@ if not exist "%HERE%nssm.exe" (
 )
 
 REM 1. harvest dynamic file trees.
-call "%HERE%heat.cmd" || exit /b 1
+REM IMPORTANT: do NOT name our wrapper heat.cmd — Windows PATHEXT picks up
+REM the .cmd in CWD before resolving heat.exe on PATH, so calling `heat`
+REM bare would recurse into our own script (STATUS_STACK_OVERFLOW).
+call "%HERE%harvest.cmd" || exit /b 1
 
 REM 2. compile.
-candle -nologo -arch x64 ^
+candle.exe -nologo -arch x64 ^
        -dVersion=%WIX_VERSION% ^
        -dWebDistSrc=%ROOT%\apps\web\dist ^
        -dWorkerSrc=%ROOT%\apps\agent-worker ^
@@ -48,7 +51,7 @@ candle -nologo -arch x64 ^
        || exit /b 1
 
 REM 3. link. WixUIExtension -> InstallDir UI; WixUtilExtension -> EnvironmentVariable.
-light  -nologo ^
+light.exe  -nologo ^
        -ext WixUIExtension -ext WixUtilExtension ^
        Mathodology.wixobj auto-web.wixobj auto-worker.wixobj auto-pycontracts.wixobj ^
        -o mathodology-%VERSION%.msi ^

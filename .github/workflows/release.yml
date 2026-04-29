@@ -181,6 +181,12 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
+          # Disable buildx provenance/SBOM. They emit a `*.dockerbuild`
+          # actions artifact alongside the GHCR push, which is bulky and
+          # bullies the release job's `download-artifact: all` step into
+          # transient failures. We're not consuming SLSA provenance.
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
@@ -366,10 +372,15 @@ jobs:
             echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Download all artifacts
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          # Explicit allowlist — keeps any future buildx provenance / SBOM /
+          # other auto-emitted artifacts out of the release bundle and avoids
+          # transient `Artifact download failed after 5 retries` on the noisy
+          # ones. Each pattern matches one upload-artifact step's `name`.
+          pattern: "{web-dist,gateway-*,deb-*,pkg-*,msi-*}"
 
       - name: Assemble platform bundles
         shell: bash

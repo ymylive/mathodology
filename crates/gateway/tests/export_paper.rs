@@ -331,7 +331,7 @@ async fn export_docx_is_a_zip_when_pandoc_present() {
     assert_eq!(resp.status(), 200);
     let bytes = resp.bytes().await.expect("body");
     // DOCX is a ZIP → starts with `PK\x03\x04`.
-    assert!(bytes.len() > 0);
+    assert!(!bytes.is_empty());
     assert_eq!(&bytes[..4], b"PK\x03\x04", "docx must be zip-framed");
 }
 
@@ -358,6 +358,6 @@ async fn export_pdf_has_pdf_magic_when_toolchain_present() {
 
     assert_eq!(resp.status(), 200);
     let bytes = resp.bytes().await.expect("body");
-    assert!(bytes.len() > 0);
+    assert!(!bytes.is_empty());
     assert_eq!(&bytes[..4], b"%PDF", "pdf must start with %PDF");
 }

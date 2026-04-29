@@ -327,14 +327,23 @@ jobs:
           # Add WiX bin dir to PATH for subsequent steps.
           $wixBin = (Get-ChildItem 'C:\Program Files (x86)\WiX Toolset *\bin' | Select-Object -Last 1).FullName
           "$wixBin" | Out-File -Append -FilePath $env:GITHUB_PATH
-      - name: Download nssm (Windows service wrapper required by Mathodology.wxs)
+      - name: Install nssm via chocolatey (Windows service wrapper for Mathodology.wxs)
         shell: pwsh
+        # Direct download from nssm.cc returns 503 intermittently. Chocolatey
+        # is already on the runner (used by the WiX install above) and mirrors
+        # the same nssm 2.24 binary.
         run: |
-          $u = "https://nssm.cc/release/nssm-2.24.zip"
-          Invoke-WebRequest $u -OutFile nssm.zip
-          Expand-Archive nssm.zip -DestinationPath nssm-extract
-          # 64-bit binary: nssm-extract\nssm-2.24\win64\nssm.exe
-          Copy-Item nssm-extract\nssm-2.24\win64\nssm.exe installer\windows\nssm.exe
+          choco install nssm --no-progress -y
+          $nssm = Get-ChildItem -Path "$env:ProgramData\chocolatey\lib\NSSM" -Filter nssm.exe -Recurse |
+                    Where-Object { $_.FullName -like "*win64*" } |
+                    Select-Object -First 1
+          if (-not $nssm) {
+            $nssm = Get-ChildItem -Path "$env:ProgramData\chocolatey\lib\NSSM" -Filter nssm.exe -Recurse |
+                      Select-Object -First 1
+          }
+          if (-not $nssm) { Write-Error "nssm.exe not found after choco install" }
+          Copy-Item $nssm.FullName installer\windows\nssm.exe
+          & installer\windows\nssm.exe version
       - name: Build .msi (heat → candle → light)
         shell: cmd
         env:

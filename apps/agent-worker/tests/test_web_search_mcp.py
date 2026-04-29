@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-
 from agent_worker.agents.searcher import _normalize_url
 from agent_worker.tools.web_search_mcp import (
     WebResult,
@@ -23,7 +22,6 @@ from agent_worker.tools.web_search_mcp import (
     _payload_to_results,
     batch_search_web,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fakes

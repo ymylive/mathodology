@@ -17,7 +17,6 @@ from __future__ import annotations
 import re
 
 import pytest
-
 from agent_worker import chart_catalog
 from agent_worker.chart_catalog import (
     ChartType,
@@ -103,11 +102,8 @@ def test_every_snippet_uses_only_matplotlib_and_numpy(chart: ChartType) -> None:
         if not stripped.startswith(("import ", "from ")):
             continue
         # Extract module head: `import foo.bar` / `from foo.bar import x`.
-        tokens = stripped.split()
-        if tokens[0] == "import":
-            mod = tokens[1].split(".")[0]
-        else:  # "from X import ..."
-            mod = tokens[1].split(".")[0]
+        # Both grammars put the dotted path at tokens[1].
+        mod = stripped.split()[1].split(".")[0]
         assert mod not in forbidden, (
             f"{chart.id} imports forbidden module {mod!r} "
             f"(kernel only ships matplotlib/numpy/scipy/sklearn/pandas)"

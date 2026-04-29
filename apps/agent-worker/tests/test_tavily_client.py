@@ -22,7 +22,6 @@ from agent_worker.tools.tavily import (
     search_tavily,
 )
 
-
 _SAMPLE_PAYLOAD: dict[str, Any] = {
     "query": "ordinary least squares",
     "results": [
@@ -258,8 +257,10 @@ async def test_batch_search_tavily_concurrency_bounded(
 
 
 def test_tavily_result_is_frozen() -> None:
+    from dataclasses import FrozenInstanceError
+
     r = TavilyResult(title="t", url="https://x", content="c", score=0.5)
-    with pytest.raises(Exception):  # frozen dataclass → FrozenInstanceError
+    with pytest.raises(FrozenInstanceError):
         r.score = 0.9  # type: ignore[misc]
 
 

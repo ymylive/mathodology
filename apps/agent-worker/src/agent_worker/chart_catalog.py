@@ -22,8 +22,8 @@ Design choices
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 

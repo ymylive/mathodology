@@ -32,6 +32,7 @@ from urllib.parse import urlsplit, urlunsplit
 import orjson
 from mm_contracts import (
     AnalyzerOutput,
+    CritiqueReport,
     Paper,
     ProblemInput,
     ReasoningEffort,
@@ -595,6 +596,36 @@ class SearcherAgent:
                         papers_payload, ensure_ascii=False, indent=2
                     ),
                     queries_json=json.dumps(queries, ensure_ascii=False),
+                ),
+            },
+        ]
+        return await self._ask_llm(model, messages)
+
+    async def revise_with_critique(
+        self,
+        *,
+        original_output: SearchFindings,
+        critique: CritiqueReport,
+        context: dict[str, Any],
+    ) -> SearchFindings:
+        """Revise synthesized findings without re-running external search tools."""
+        model = self._model_override or self.prompt.model_preference[0]
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.prompt.system["text"]},
+            {
+                "role": "user",
+                "content": (
+                    "Revise the previous SearchFindings JSON using the Critic "
+                    "feedback below. Do not invent new papers, URLs, datasets, "
+                    "or claims. Preserve valid retrieved sources and only adjust "
+                    "queries, key_findings, datasets_mentioned, and source "
+                    "selection when supported by the original output.\n\n"
+                    "Context JSON:\n"
+                    f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
+                    "Original SearchFindings JSON:\n"
+                    f"{original_output.model_dump_json(indent=2)}\n\n"
+                    "Critique JSON:\n"
+                    f"{critique.model_dump_json(indent=2)}"
                 ),
             },
         ]

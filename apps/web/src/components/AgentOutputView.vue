@@ -4,6 +4,7 @@
 // schema_name. Unknown schemas render a muted "unknown schema" notice so
 // a contract rev doesn't silently break the surface.
 import AnalyzerOutput from "./AnalyzerOutput.vue";
+import CritiqueReport from "./CritiqueReport.vue";
 import SearchFindings from "./SearchFindings.vue";
 import ModelSpec from "./ModelSpec.vue";
 import T from "./T.vue";
@@ -29,6 +30,11 @@ defineProps<{
   <component
     :is="ModelSpec"
     v-else-if="schemaName === 'ModelSpec'"
+    :output="output"
+  />
+  <component
+    :is="CritiqueReport"
+    v-else-if="schemaName === 'CritiqueReport'"
     :output="output"
   />
   <div v-else class="output-panel">

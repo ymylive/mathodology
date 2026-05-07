@@ -20,18 +20,31 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from mm_contracts import Figure, PaperDraft, ProblemInput
+from mm_contracts import (
+    AnalyzerOutput,
+    CoderOutput,
+    CritiqueReport,
+    Figure,
+    ModelSpec,
+    PaperDraft,
+    ProblemInput,
+    SearchFindings,
+)
+from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from agent_worker.agents import (
     AgentError,
     AnalyzerAgent,
+    BaseAgent,
     CoderAgent,
+    CriticAgent,
     ModelerAgent,
     SearcherAgent,
     WriterAgent,
@@ -43,6 +56,21 @@ from agent_worker.hmml import HMMLService
 from agent_worker.kernel import KernelSession
 
 _log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CriticPolicy:
+    min_score: float = 0.80
+    min_checklist_pass_rate: float = 0.85
+    max_revision_rounds: int = 2
+    coder_revision_iterations: int = 2
+    max_revision_cost_rmb: float = 1.00
+    estimated_review_cost_rmb: float = 0.02
+    estimated_revision_cost_rmb: float = 0.05
+    estimated_coder_revision_cost_rmb: float = 0.12
+
+
+DEFAULT_CRITIC_POLICY = CriticPolicy()
 
 
 @lru_cache(maxsize=1)
@@ -57,6 +85,189 @@ def _get_hmml() -> HMMLService | None:
         _log.warning("HMML seed dir is empty; Modeler will run without it.")
         return None
     return service
+
+
+def _critique_requires_revision(
+    report: CritiqueReport, policy: CriticPolicy = DEFAULT_CRITIC_POLICY
+) -> bool:
+    if report.budget_exhausted:
+        return False
+    if report.has_blocking_findings:
+        return True
+    if report.major_finding_count >= 2:
+        return True
+    if report.score < policy.min_score:
+        return True
+    if report.checklist_pass_rate < policy.min_checklist_pass_rate:
+        return True
+    if report.passed:
+        return False
+    return report.has_major_findings
+
+
+def _critique_should_fail_run(report: CritiqueReport) -> bool:
+    if report.has_blocking_findings:
+        return (not report.passed) or report.budget_exhausted
+    return False
+
+
+def _searcher_review_criteria() -> list[str]:
+    return [
+        "Source quality is reliable enough for academic citation or clearly marked as web context.",
+        "Citation coverage supports every synthesized key finding that downstream Writer may cite.",
+        "Source relevance is clear for the analyzed modeling approach and problem context.",
+        "Empty or sparse search results are handled gracefully without inventing references.",
+    ]
+
+
+async def _review_and_maybe_revise(
+    *,
+    critic: CriticAgent,
+    producer: BaseAgent,
+    target_agent: str,
+    output: BaseModel,
+    context: dict[str, Any],
+    criteria: list[str],
+    policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
+    estimated_review_cost_rmb: float | None = None,
+    estimated_revision_cost_rmb: float | None = None,
+) -> BaseModel:
+    review_cost_rmb = (
+        policy.estimated_review_cost_rmb
+        if estimated_review_cost_rmb is None
+        else estimated_review_cost_rmb
+    )
+    revision_cost_rmb = (
+        policy.estimated_revision_cost_rmb
+        if estimated_revision_cost_rmb is None
+        else estimated_revision_cost_rmb
+    )
+    current = output
+    loop_cost_rmb = 0.0
+    report = await critic.review(
+        target_agent=target_agent,  # type: ignore[arg-type]
+        target_schema=type(current).__name__,
+        artifact=current.model_dump(mode="json"),
+        context=context,
+        criteria=criteria,
+        revision_round=0,
+        max_revision_rounds=policy.max_revision_rounds,
+    )
+    loop_cost_rmb += review_cost_rmb
+    if not _critique_requires_revision(report, policy):
+        return current
+
+    for revision_round in range(1, policy.max_revision_rounds + 1):
+        if loop_cost_rmb + revision_cost_rmb > policy.max_revision_cost_rmb:
+            report.budget_exhausted = True
+            break
+        current = await producer.revise_with_critique(
+            original_output=current,
+            critique=report,
+            context=context,
+        )
+        loop_cost_rmb += revision_cost_rmb
+        if loop_cost_rmb + review_cost_rmb > policy.max_revision_cost_rmb:
+            report.budget_exhausted = True
+            break
+        report = await critic.review(
+            target_agent=target_agent,  # type: ignore[arg-type]
+            target_schema=type(current).__name__,
+            artifact=current.model_dump(mode="json"),
+            context=context,
+            criteria=criteria,
+            revision_round=revision_round,
+            max_revision_rounds=policy.max_revision_rounds,
+        )
+        loop_cost_rmb += review_cost_rmb
+        if not _critique_requires_revision(report, policy):
+            return current
+
+    if _critique_should_fail_run(report):
+        raise AgentError(
+            f"Critic rejected {target_agent} after revision: {report.summary}"
+        )
+    return current
+
+
+async def _review_and_maybe_rerun_coder(
+    *,
+    critic: CriticAgent,
+    coder: CoderAgent,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
+    coder_out: CoderOutput,
+    policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
+) -> CoderOutput:
+    criteria = [
+        "Executed cells support the model specification.",
+        "Output contains concrete numerical results.",
+        "Validation or sensitivity evidence is present where applicable.",
+        "Figures are registered with ids, captions, and valid paths.",
+    ]
+    context = {
+        "problem_text": problem.problem_text,
+        "analysis": analysis.model_dump(mode="json"),
+        "spec": spec.model_dump(mode="json"),
+    }
+    report = await critic.review(
+        target_agent="coder",
+        target_schema="CoderOutput",
+        artifact=coder_out.model_dump(mode="json"),
+        context=context,
+        criteria=criteria,
+        revision_round=0,
+        max_revision_rounds=policy.max_revision_rounds,
+    )
+    loop_cost_rmb = policy.estimated_review_cost_rmb
+    if not _critique_requires_revision(report, policy):
+        return coder_out
+
+    current = coder_out
+    for revision_round in range(1, policy.max_revision_rounds + 1):
+        if (
+            loop_cost_rmb + policy.estimated_coder_revision_cost_rmb
+            > policy.max_revision_cost_rmb
+        ):
+            report.budget_exhausted = True
+            break
+        revision_problem = CoderAgent.build_revision_problem(
+            problem=problem,
+            analysis=analysis,
+            spec=spec,
+            original_output=current,
+            critique=report,
+        )
+        current = await coder.run(
+            revision_problem,
+            analysis,
+            spec,
+            max_iterations=policy.coder_revision_iterations,
+        )
+        loop_cost_rmb += policy.estimated_coder_revision_cost_rmb
+        if (
+            loop_cost_rmb + policy.estimated_review_cost_rmb
+            > policy.max_revision_cost_rmb
+        ):
+            report.budget_exhausted = True
+            break
+        report = await critic.review(
+            target_agent="coder",
+            target_schema="CoderOutput",
+            artifact=current.model_dump(mode="json"),
+            context=context,
+            criteria=criteria,
+            revision_round=revision_round,
+            max_revision_rounds=policy.max_revision_rounds,
+        )
+        loop_cost_rmb += policy.estimated_review_cost_rmb
+        if not _critique_requires_revision(report, policy):
+            return current
+
+    if _critique_should_fail_run(report):
+        raise AgentError(f"Critic rejected coder after revision: {report.summary}")
+    return current
 
 
 async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> None:
@@ -83,21 +294,100 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             }
 
             analyzer = AnalyzerAgent(gateway, emitter, **kwargs)
+            critic = CriticAgent(gateway, emitter, **kwargs)
             analysis = await analyzer.run_for_problem(problem)
+            analysis = await _review_and_maybe_revise(
+                critic=critic,
+                producer=analyzer,
+                target_agent="analyzer",
+                output=analysis,
+                context={
+                    "problem_text": problem.problem_text,
+                    "competition_type": problem.competition_type,
+                },
+                criteria=[
+                    "Restates every sub-question in the problem.",
+                    "Lists assumptions needed downstream.",
+                    "Lists concrete data requirements.",
+                    "Proposes at least one usable modeling approach.",
+                ],
+            )
+            assert isinstance(analysis, AnalyzerOutput)
 
             searcher = SearcherAgent(gateway, emitter, **kwargs)
             findings = await searcher.run_for(problem, analysis)
+            findings = await _review_and_maybe_revise(
+                critic=critic,
+                producer=searcher,
+                target_agent="searcher",
+                output=findings,
+                context={
+                    "problem_text": problem.problem_text,
+                    "competition_type": problem.competition_type,
+                    "analysis": analysis.model_dump(mode="json"),
+                },
+                criteria=_searcher_review_criteria(),
+            )
+            assert isinstance(findings, SearchFindings)
 
             modeler = ModelerAgent(gateway, emitter, hmml=hmml, **kwargs)
             spec = await modeler.run_for(problem, analysis)
+            spec = await _review_and_maybe_revise(
+                critic=critic,
+                producer=modeler,
+                target_agent="modeler",
+                output=spec,
+                context={
+                    "problem_text": problem.problem_text,
+                    "analysis": analysis.model_dump(mode="json"),
+                },
+                criteria=[
+                    "Chosen approach fits the analyzed problem.",
+                    "Variables and equations are internally consistent.",
+                    "Algorithm outline is executable by Coder.",
+                    "Validation strategy is concrete.",
+                ],
+            )
+            assert isinstance(spec, ModelSpec)
 
             coder = CoderAgent(gateway, emitter, kernel, **kwargs)
             coder_out = await coder.run(problem, analysis, spec)
+            coder_out = await _review_and_maybe_rerun_coder(
+                critic=critic,
+                coder=coder,
+                problem=problem,
+                analysis=analysis,
+                spec=spec,
+                coder_out=coder_out,
+            )
 
             writer = WriterAgent(gateway, emitter, **kwargs)
             paper = await writer.run_for(
                 problem, analysis, spec, coder_out, findings
             )
+            paper = await _review_and_maybe_revise(
+                critic=critic,
+                producer=writer,
+                target_agent="writer",
+                output=paper,
+                context={
+                    "problem_text": problem.problem_text,
+                    "competition_type": problem.competition_type,
+                    "analysis": analysis.model_dump(mode="json"),
+                    "spec": spec.model_dump(mode="json"),
+                    "coder_output": coder_out.model_dump(mode="json"),
+                    "search_findings": findings.model_dump(mode="json"),
+                },
+                criteria=[
+                    "Abstract follows award-mode numeric-result rules.",
+                    "Every problem sub-question is answered explicitly.",
+                    "Sensitivity analysis and strengths/weaknesses are present when applicable.",
+                    "References are sufficient and cited in the body.",
+                    "Figures are referenced using known figure ids and discussed with numbers.",
+                    "No school, student, or identifying team information appears.",
+                ],
+            )
+            assert isinstance(paper, PaperDraft)
 
             # Resolve `[[FIG:<id>]]` placeholders in the Writer's output:
             # the on-disk paper.md gets real markdown image syntax (for the

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 5-step pill header (Analyzer → Searcher → Modeler → Coder → Writer).
+// 6-step pill header (Analyzer → Searcher → Modeler → Coder → Writer → Critic).
 // State per agent is derived from run.events:
 //   - `done` after a `stage.done` for that agent
 //   - `run`  between `stage.start` and `stage.done`
@@ -35,6 +35,7 @@ const AGENTS: { agent: Exclude<AgentName, null>; num: string; en: string; zh: st
   { agent: "modeler",  num: "C · 03", en: "Modeler",  zh: "建模员" },
   { agent: "coder",    num: "D · 04", en: "Coder",    zh: "编程员" },
   { agent: "writer",   num: "E · 05", en: "Writer",   zh: "撰写员" },
+  { agent: "critic",   num: "Q · 06", en: "Critic",   zh: "审查员" },
 ];
 
 function firstStartFor(agent: AgentName, events: AgentEvent[]): AgentEvent | null {

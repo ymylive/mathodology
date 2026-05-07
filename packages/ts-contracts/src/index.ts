@@ -32,6 +32,56 @@ export interface AgentEvent {
   payload: Record<string, unknown>;
 }
 
+export type CritiqueSeverity = "info" | "minor" | "major" | "blocking";
+export type CriticRole =
+  | "modeling_coach"
+  | "academic_reviewer"
+  | "code_reviewer";
+export type ReviewTargetAgent =
+  | "analyzer"
+  | "searcher"
+  | "modeler"
+  | "coder"
+  | "writer";
+
+export interface CritiqueFinding {
+  severity: CritiqueSeverity;
+  area: string;
+  message: string;
+  evidence: string;
+  required_change: string;
+}
+
+export interface CritiqueChecklistItem {
+  id: string;
+  label: string;
+  passed: boolean;
+  evidence: string;
+}
+
+export interface RoleCritique {
+  role: CriticRole;
+  passed: boolean;
+  score: number;
+  summary: string;
+  findings: CritiqueFinding[];
+}
+
+export interface CritiqueReport {
+  target_agent: ReviewTargetAgent;
+  target_schema: string;
+  passed: boolean;
+  score: number;
+  summary: string;
+  findings: CritiqueFinding[];
+  required_changes: string[];
+  roles?: RoleCritique[];
+  checklist?: CritiqueChecklistItem[];
+  revision_round?: number;
+  max_revision_rounds?: number;
+  budget_exhausted?: boolean;
+}
+
 // Hand-written figure / paper-meta shapes. Mirrors
 // `packages/py-contracts/src/mm_contracts/agent_io.py::Figure` and the
 // `paper.meta.json` structure written by the worker's pipeline. Consumed by

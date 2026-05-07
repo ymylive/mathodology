@@ -162,3 +162,32 @@ async def test_coder_agent_retries_on_parse_error(
     assert gateway.calls == 2
     assert output.final_summary == "retried"
     assert len(output.cells) == 1
+
+
+async def test_coder_agent_respects_explicit_iteration_cap(
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
+) -> None:
+    class _LoopingGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream_completion(self, **_: object) -> AsyncIterator[str]:
+            self.calls += 1
+            yield (
+                '{"reasoning":"continue","code":"print(\\"cell '
+                f'{self.calls}\\")","done":false,"summary":null}}'
+            )
+
+    gateway = _LoopingGateway()
+    emitter = _FakeEmitter()
+    kernel = KernelSession(uuid4(), tmp_path)
+
+    agent = CoderAgent(gateway, emitter, kernel)  # type: ignore[arg-type]
+    output = await agent.run(problem, analysis, spec, max_iterations=2)
+
+    assert gateway.calls == 2
+    assert len(output.cells) == 2
+    assert output.final_summary == "Reached iteration limit without explicit done."

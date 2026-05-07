@@ -167,7 +167,7 @@ jobs:
 
       - name: Regenerate contracts
         run: |
-          uv tool run datamodel-codegen \
+          datamodel-codegen \
             --input packages/contracts/openapi.yaml \
             --input-file-type openapi \
             --output packages/py-contracts/src/mm_contracts/generated.py \

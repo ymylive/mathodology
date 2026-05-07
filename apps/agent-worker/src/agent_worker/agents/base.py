@@ -6,11 +6,12 @@ template variables via `run(**vars)` (or wrap that with a typed helper).
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, ClassVar
 
 import orjson
-from mm_contracts import ReasoningEffort
+from mm_contracts import CritiqueReport, ReasoningEffort
 from pydantic import BaseModel, ValidationError
 
 from agent_worker.events import EventEmitter
@@ -157,6 +158,36 @@ class BaseAgent:
             return self.OUTPUT_MODEL.model_validate(obj)
         except ValidationError as e:
             raise AgentParseError(str(e)) from e
+
+    async def revise_with_critique(
+        self,
+        *,
+        original_output: BaseModel,
+        critique: CritiqueReport,
+        context: dict[str, Any],
+    ) -> BaseModel:
+        """Ask the producing agent to revise its own structured output once."""
+        model = self._model_override or self.prompt.model_preference[0]
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.prompt.system["text"]},
+            {
+                "role": "user",
+                "content": (
+                    "Revise your previous JSON output using the Critic feedback below.\n"
+                    "Return ONLY a valid JSON object matching "
+                    f"{self.OUTPUT_MODEL.__name__}. Preserve correct content; "
+                    "change only what is needed to satisfy the critique.\n\n"
+                    "Context JSON:\n"
+                    f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
+                    "Original output JSON:\n"
+                    f"{original_output.model_dump_json(indent=2)}\n\n"
+                    "Critique JSON:\n"
+                    f"{critique.model_dump_json(indent=2)}"
+                ),
+            },
+        ]
+        text = await self._stream_and_collect(model, messages)
+        return self._parse_output(text)
 
 
 async def _stream_with_retry(

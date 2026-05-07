@@ -995,3 +995,108 @@ body.zh .paper-draft h2 { font-family: 'Noto Serif SC', serif; font-weight: 500;
   transition: background-color var(--dur-micro) ease-out,
               color var(--dur-micro) ease-out;
 }
+
+.critique-report .critique-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.critique-report .critique-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 0.25rem;
+}
+
+.critique-report .critique-meta .budget {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.critique-report .badge {
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.critique-report .badge.ok {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+}
+
+.critique-report .badge.fail {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+
+.critique-report .role-grid {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.critique-report .role-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.critique-report .role-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-transform: capitalize;
+}
+
+.critique-report .checklist {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.critique-report .check-item {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr;
+  gap: 0.5rem;
+  align-items: start;
+  border-left: 3px solid var(--line);
+  padding-left: 0.65rem;
+}
+
+.critique-report .check-item.ok {
+  border-left-color: #16a34a;
+}
+
+.critique-report .check-item.fail {
+  border-left-color: #dc2626;
+}
+
+.critique-report .finding {
+  border-left: 3px solid var(--line);
+  padding: 0.5rem 0 0.5rem 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.critique-report .finding-title {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.critique-report .sev-blocking {
+  border-left-color: #dc2626;
+}
+
+.critique-report .sev-major {
+  border-left-color: #ea580c;
+}
+
+.critique-report .sev-minor {
+  border-left-color: #ca8a04;
+}

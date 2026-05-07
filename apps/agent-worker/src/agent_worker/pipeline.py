@@ -143,13 +143,48 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             }
 
             analyzer = AnalyzerAgent(gateway, emitter, **kwargs)
+            critic = CriticAgent(gateway, emitter, **kwargs)
             analysis = await analyzer.run_for_problem(problem)
+            analysis = await _review_and_maybe_revise(
+                critic=critic,
+                producer=analyzer,
+                target_agent="analyzer",
+                output=analysis,
+                context={
+                    "problem_text": problem.problem_text,
+                    "competition_type": problem.competition_type,
+                },
+                criteria=[
+                    "Restates every sub-question in the problem.",
+                    "Lists assumptions needed downstream.",
+                    "Lists concrete data requirements.",
+                    "Proposes at least one usable modeling approach.",
+                ],
+            )
+            assert isinstance(analysis, AnalyzerOutput)
 
             searcher = SearcherAgent(gateway, emitter, **kwargs)
             findings = await searcher.run_for(problem, analysis)
 
             modeler = ModelerAgent(gateway, emitter, hmml=hmml, **kwargs)
             spec = await modeler.run_for(problem, analysis)
+            spec = await _review_and_maybe_revise(
+                critic=critic,
+                producer=modeler,
+                target_agent="modeler",
+                output=spec,
+                context={
+                    "problem_text": problem.problem_text,
+                    "analysis": analysis.model_dump(mode="json"),
+                },
+                criteria=[
+                    "Chosen approach fits the analyzed problem.",
+                    "Variables and equations are internally consistent.",
+                    "Algorithm outline is executable by Coder.",
+                    "Validation strategy is concrete.",
+                ],
+            )
+            assert isinstance(spec, ModelSpec)
 
             coder = CoderAgent(gateway, emitter, kernel, **kwargs)
             coder_out = await coder.run(problem, analysis, spec)

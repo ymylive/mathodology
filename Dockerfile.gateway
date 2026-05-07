@@ -1,7 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- builder ----
-FROM --platform=$BUILDPLATFORM rust:1.83-slim-bookworm AS builder
+# NB: do NOT pin to --platform=$BUILDPLATFORM here. We want the builder to
+# match the buildx target so cargo emits a binary the runtime image can
+# actually exec. Pinning to BUILDPLATFORM produced amd64 binaries inside
+# arm64 images (qemu-x86_64 launch failures on Apple Silicon / Graviton),
+# fixed in v0.5.1. Trade-off: arm64 builds run cargo under qemu, ~3x
+# slower, but correctness wins.
+FROM rust:1.83-slim-bookworm AS builder
 ENV CARGO_TERM_COLOR=always DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       pkg-config libssl-dev ca-certificates \

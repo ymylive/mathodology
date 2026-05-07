@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from mm_contracts import CritiqueChecklistItem, CritiqueFinding, CritiqueReport
-
 from agent_worker.pipeline import (
     CriticPolicy,
     _critique_requires_revision,
     _critique_should_fail_run,
 )
+from mm_contracts import CritiqueChecklistItem, CritiqueFinding, CritiqueReport
 
 
 def _report(

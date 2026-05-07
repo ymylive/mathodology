@@ -3,14 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from mm_contracts import AnalyzerOutput, ApproachSketch, CritiqueFinding, CritiqueReport
-
 from agent_worker.agents import AgentError
 from agent_worker.pipeline import (
     CriticPolicy,
     _review_and_maybe_revise,
     _searcher_review_criteria,
 )
+from mm_contracts import AnalyzerOutput, ApproachSketch, CritiqueFinding, CritiqueReport
 
 
 class _FakeProducer:

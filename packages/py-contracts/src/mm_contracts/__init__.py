@@ -22,6 +22,7 @@ from mm_contracts.agent_io import (
     PaperSection,
     ProblemInput,
     ReasoningEffort,
+    RoleCritique,
     RunResult,
     SearchConfig,
     SearchEngine,
@@ -29,7 +30,6 @@ from mm_contracts.agent_io import (
     SearchPrimary,
     TokenUsage,
     Variable,
-    RoleCritique,
 )
 
 __all__ = [

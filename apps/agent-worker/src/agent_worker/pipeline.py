@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,17 @@ from agent_worker.hmml import HMMLService
 from agent_worker.kernel import KernelSession
 
 _log = logging.getLogger(__name__)
-MAX_CRITIC_REVISIONS = 1
+
+
+@dataclass(frozen=True)
+class CriticPolicy:
+    min_score: float = 0.80
+    min_checklist_pass_rate: float = 0.85
+    max_revision_rounds: int = 2
+    coder_revision_iterations: int = 2
+
+
+DEFAULT_CRITIC_POLICY = CriticPolicy()
 
 
 @lru_cache(maxsize=1)
@@ -71,14 +82,28 @@ def _get_hmml() -> HMMLService | None:
     return service
 
 
-def _critique_requires_revision(report: CritiqueReport) -> bool:
+def _critique_requires_revision(
+    report: CritiqueReport, policy: CriticPolicy = DEFAULT_CRITIC_POLICY
+) -> bool:
+    if report.budget_exhausted:
+        return False
+    if report.has_blocking_findings:
+        return True
+    if report.major_finding_count >= 2:
+        return True
+    if report.score < policy.min_score:
+        return True
+    if report.checklist_pass_rate < policy.min_checklist_pass_rate:
+        return True
     if report.passed:
         return False
-    return report.has_blocking_findings or report.has_major_findings
+    return report.has_major_findings
 
 
 def _critique_should_fail_run(report: CritiqueReport) -> bool:
-    return (not report.passed) and report.has_blocking_findings
+    if report.has_blocking_findings:
+        return (not report.passed) or report.budget_exhausted
+    return False
 
 
 async def _review_and_maybe_revise(

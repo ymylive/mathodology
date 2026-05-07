@@ -34,6 +34,7 @@ from mm_contracts import (
     ModelSpec,
     PaperDraft,
     ProblemInput,
+    SearchFindings,
 )
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -104,6 +105,15 @@ def _critique_should_fail_run(report: CritiqueReport) -> bool:
     if report.has_blocking_findings:
         return (not report.passed) or report.budget_exhausted
     return False
+
+
+def _searcher_review_criteria() -> list[str]:
+    return [
+        "Source quality is reliable enough for academic citation or clearly marked as web context.",
+        "Citation coverage supports every synthesized key finding that downstream Writer may cite.",
+        "Source relevance is clear for the analyzed modeling approach and problem context.",
+        "Empty or sparse search results are handled gracefully without inventing references.",
+    ]
 
 
 async def _review_and_maybe_revise(
@@ -260,6 +270,19 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
 
             searcher = SearcherAgent(gateway, emitter, **kwargs)
             findings = await searcher.run_for(problem, analysis)
+            findings = await _review_and_maybe_revise(
+                critic=critic,
+                producer=searcher,
+                target_agent="searcher",
+                output=findings,
+                context={
+                    "problem_text": problem.problem_text,
+                    "competition_type": problem.competition_type,
+                    "analysis": analysis.model_dump(mode="json"),
+                },
+                criteria=_searcher_review_criteria(),
+            )
+            assert isinstance(findings, SearchFindings)
 
             modeler = ModelerAgent(gateway, emitter, hmml=hmml, **kwargs)
             spec = await modeler.run_for(problem, analysis)

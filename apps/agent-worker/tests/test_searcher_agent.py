@@ -10,6 +10,8 @@ from agent_worker.agents import SearcherAgent
 from mm_contracts import (
     AnalyzerOutput,
     ApproachSketch,
+    CritiqueFinding,
+    CritiqueReport,
     DataRequirement,
     Paper,
     ProblemInput,
@@ -295,3 +297,47 @@ def test_build_queries_falls_back_to_problem_text() -> None:
     qs = agent._build_queries(problem, empty_analysis)
     assert len(qs) == 1
     assert qs[0].startswith("A very long problem statement.")
+
+
+async def test_searcher_revise_with_critique_returns_validated_findings(
+    problem: ProblemInput, analysis: AnalyzerOutput
+) -> None:
+    revised_json = (
+        '{"queries":["queueing network"],'
+        '"papers":[],'
+        '"key_findings":["Sparse search results; use as context only."],'
+        '"datasets_mentioned":[]}'
+    )
+    gateway = _FakeGateway([revised_json])
+    emitter = _FakeEmitter()
+    agent = SearcherAgent(gateway, emitter)  # type: ignore[arg-type]
+    original = SearchFindings(
+        queries=["queueing network"],
+        papers=[],
+        key_findings=["Adaptive signal timing is solved."],
+    )
+    critique = CritiqueReport(
+        target_agent="searcher",
+        target_schema="SearchFindings",
+        passed=False,
+        score=0.6,
+        summary="Finding overclaims empty search results.",
+        findings=[
+            CritiqueFinding(
+                severity="major",
+                area="empty result handling",
+                message="The finding invents confidence despite no papers.",
+                evidence="papers is empty but key_findings states solved.",
+                required_change="Mark sparse results as context only.",
+            )
+        ],
+        required_changes=["Revise key findings to avoid unsupported claims."],
+    )
+
+    revised = await agent.revise_with_critique(
+        original_output=original,
+        critique=critique,
+        context={"problem_text": problem.problem_text, "analysis": analysis.model_dump()},
+    )
+
+    assert revised.key_findings == ["Sparse search results; use as context only."]

@@ -6,7 +6,11 @@ import pytest
 from mm_contracts import AnalyzerOutput, ApproachSketch, CritiqueFinding, CritiqueReport
 
 from agent_worker.agents import AgentError
-from agent_worker.pipeline import CriticPolicy, _review_and_maybe_revise
+from agent_worker.pipeline import (
+    CriticPolicy,
+    _review_and_maybe_revise,
+    _searcher_review_criteria,
+)
 
 
 class _FakeProducer:
@@ -150,6 +154,16 @@ async def test_review_and_maybe_revise_allows_two_revision_rounds() -> None:
     assert result is second_revision
     assert producer.revision_calls == 2
     assert critic.calls == 3
+
+
+def test_searcher_review_criteria_cover_source_quality_and_empty_results() -> None:
+    criteria = _searcher_review_criteria()
+
+    joined = "\n".join(criteria).lower()
+    assert "source" in joined
+    assert "citation" in joined
+    assert "relevance" in joined
+    assert "empty" in joined
 
 
 async def test_review_and_maybe_revise_fails_after_budget_with_blocking() -> None:

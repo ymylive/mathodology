@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from mm_contracts import AnalyzerOutput, ApproachSketch, CritiqueFinding, CritiqueReport
 
-from agent_worker.pipeline import _review_and_maybe_revise
+from agent_worker.agents import AgentError
+from agent_worker.pipeline import CriticPolicy, _review_and_maybe_revise
 
 
 class _FakeProducer:
@@ -12,7 +14,7 @@ class _FakeProducer:
     OUTPUT_MODEL = AnalyzerOutput
 
     def __init__(self, revised: AnalyzerOutput) -> None:
-        self.revised = revised
+        self.revisions = [revised]
         self.revision_calls = 0
 
     async def revise_with_critique(
@@ -23,7 +25,13 @@ class _FakeProducer:
         context: dict[str, Any],
     ) -> AnalyzerOutput:
         self.revision_calls += 1
-        return self.revised
+        return self.revisions[min(self.revision_calls - 1, len(self.revisions) - 1)]
+
+
+class _SequenceProducer(_FakeProducer):
+    def __init__(self, revisions: list[AnalyzerOutput]) -> None:
+        super().__init__(revisions[0])
+        self.revisions = revisions
 
 
 class _FakeCritic:
@@ -46,12 +54,18 @@ def _analysis(sub_questions: list[str]) -> AnalyzerOutput:
     )
 
 
-def _report(passed: bool, *, major: bool = False) -> CritiqueReport:
+def _report(
+    passed: bool,
+    *,
+    major: bool = False,
+    blocking: bool = False,
+    score: float | None = None,
+) -> CritiqueReport:
     findings = []
-    if major:
+    if major or blocking:
         findings.append(
             CritiqueFinding(
-                severity="major",
+                severity="blocking" if blocking else "major",
                 area="coverage",
                 message="Missing allocation sub-question.",
                 evidence="Only demand is listed.",
@@ -62,7 +76,7 @@ def _report(passed: bool, *, major: bool = False) -> CritiqueReport:
         target_agent="analyzer",
         target_schema="AnalyzerOutput",
         passed=passed,
-        score=0.9 if passed else 0.5,
+        score=score if score is not None else (0.9 if passed else 0.5),
         summary="ok" if passed else "needs revision",
         findings=findings,
         required_changes=["Add allocation optimization."] if findings else [],
@@ -106,3 +120,64 @@ async def test_review_and_maybe_revise_returns_revised_after_failed_first_review
     assert result is revised
     assert producer.revision_calls == 1
     assert critic.calls == 2
+
+
+async def test_review_and_maybe_revise_allows_two_revision_rounds() -> None:
+    original = _analysis(["Estimate demand"])
+    first_revision = _analysis(["Estimate demand", "Optimize allocation"])
+    second_revision = _analysis(
+        ["Estimate demand", "Optimize allocation", "Validate robustness"]
+    )
+    producer = _SequenceProducer([first_revision, second_revision])
+    critic = _FakeCritic(
+        [
+            _report(False, major=True),
+            _report(True, score=0.79),
+            _report(True, score=0.92),
+        ]
+    )
+
+    result = await _review_and_maybe_revise(
+        critic=critic,  # type: ignore[arg-type]
+        producer=producer,  # type: ignore[arg-type]
+        target_agent="analyzer",
+        output=original,
+        context={"problem_text": "Estimate demand and optimize allocation."},
+        criteria=["covers all sub-questions"],
+        policy=CriticPolicy(max_revision_rounds=2),
+    )
+
+    assert result is second_revision
+    assert producer.revision_calls == 2
+    assert critic.calls == 3
+
+
+async def test_review_and_maybe_revise_fails_after_budget_with_blocking() -> None:
+    original = _analysis(["Estimate demand"])
+    producer = _SequenceProducer(
+        [
+            _analysis(["Estimate demand", "Optimize allocation"]),
+            _analysis(["Estimate demand", "Optimize allocation", "Validate robustness"]),
+        ]
+    )
+    critic = _FakeCritic(
+        [
+            _report(False, blocking=True),
+            _report(False, blocking=True),
+            _report(False, blocking=True),
+        ]
+    )
+
+    with pytest.raises(AgentError):
+        await _review_and_maybe_revise(
+            critic=critic,  # type: ignore[arg-type]
+            producer=producer,  # type: ignore[arg-type]
+            target_agent="analyzer",
+            output=original,
+            context={"problem_text": "Estimate demand and optimize allocation."},
+            criteria=["covers all sub-questions"],
+            policy=CriticPolicy(max_revision_rounds=2),
+        )
+
+    assert producer.revision_calls == 2
+    assert critic.calls == 3

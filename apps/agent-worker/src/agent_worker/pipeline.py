@@ -114,34 +114,44 @@ async def _review_and_maybe_revise(
     output: BaseModel,
     context: dict[str, Any],
     criteria: list[str],
+    policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
 ) -> BaseModel:
+    current = output
     report = await critic.review(
         target_agent=target_agent,  # type: ignore[arg-type]
-        target_schema=type(output).__name__,
-        artifact=output.model_dump(mode="json"),
+        target_schema=type(current).__name__,
+        artifact=current.model_dump(mode="json"),
         context=context,
         criteria=criteria,
+        revision_round=0,
+        max_revision_rounds=policy.max_revision_rounds,
     )
-    if not _critique_requires_revision(report):
-        return output
+    if not _critique_requires_revision(report, policy):
+        return current
 
-    revised = await producer.revise_with_critique(
-        original_output=output,
-        critique=report,
-        context=context,
-    )
-    followup = await critic.review(
-        target_agent=target_agent,  # type: ignore[arg-type]
-        target_schema=type(revised).__name__,
-        artifact=revised.model_dump(mode="json"),
-        context=context,
-        criteria=criteria,
-    )
-    if _critique_should_fail_run(followup):
-        raise AgentError(
-            f"Critic rejected {target_agent} after revision: {followup.summary}"
+    for revision_round in range(1, policy.max_revision_rounds + 1):
+        current = await producer.revise_with_critique(
+            original_output=current,
+            critique=report,
+            context=context,
         )
-    return revised
+        report = await critic.review(
+            target_agent=target_agent,  # type: ignore[arg-type]
+            target_schema=type(current).__name__,
+            artifact=current.model_dump(mode="json"),
+            context=context,
+            criteria=criteria,
+            revision_round=revision_round,
+            max_revision_rounds=policy.max_revision_rounds,
+        )
+        if not _critique_requires_revision(report, policy):
+            return current
+
+    if _critique_should_fail_run(report):
+        raise AgentError(
+            f"Critic rejected {target_agent} after revision: {report.summary}"
+        )
+    return current
 
 
 async def _review_and_maybe_rerun_coder(

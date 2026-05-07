@@ -55,6 +55,19 @@ class Settings(BaseSettings):
     # so deploys without a key still work.
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
 
+    # --- Scholarly metadata APIs (companions to arXiv) --------------------
+    # OpenAlex and Crossref are query-by-keyword scholarly APIs that run in
+    # parallel with arXiv every search. They have no key, much higher rate
+    # limits than arXiv, and act as fallback evidence whenever arXiv 429s.
+    # Setting MM_POLITE_MAILTO routes us into both providers' "polite pool"
+    # for faster + more forgiving responses; without it we use the public
+    # pool, which is slower but still works.
+    polite_mailto: str = Field(default="", alias="MM_POLITE_MAILTO")
+    # Hard kill-switches — useful when a network is offline or one provider
+    # is 5xx-flooding the worker logs.
+    openalex_disabled: bool = Field(default=False, alias="OPENALEX_DISABLED")
+    crossref_disabled: bool = Field(default=False, alias="CROSSREF_DISABLED")
+
 
 def get_settings() -> Settings:
     """Load settings. Kept as a function so tests can override easily."""

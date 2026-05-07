@@ -65,6 +65,9 @@ class CriticPolicy:
     max_revision_rounds: int = 2
     coder_revision_iterations: int = 2
     max_revision_cost_rmb: float = 1.00
+    estimated_review_cost_rmb: float = 0.02
+    estimated_revision_cost_rmb: float = 0.05
+    estimated_coder_revision_cost_rmb: float = 0.12
 
 
 DEFAULT_CRITIC_POLICY = CriticPolicy()
@@ -126,9 +129,19 @@ async def _review_and_maybe_revise(
     context: dict[str, Any],
     criteria: list[str],
     policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
-    estimated_review_cost_rmb: float = 0.0,
-    estimated_revision_cost_rmb: float = 0.0,
+    estimated_review_cost_rmb: float | None = None,
+    estimated_revision_cost_rmb: float | None = None,
 ) -> BaseModel:
+    review_cost_rmb = (
+        policy.estimated_review_cost_rmb
+        if estimated_review_cost_rmb is None
+        else estimated_review_cost_rmb
+    )
+    revision_cost_rmb = (
+        policy.estimated_revision_cost_rmb
+        if estimated_revision_cost_rmb is None
+        else estimated_revision_cost_rmb
+    )
     current = output
     loop_cost_rmb = 0.0
     report = await critic.review(
@@ -140,12 +153,12 @@ async def _review_and_maybe_revise(
         revision_round=0,
         max_revision_rounds=policy.max_revision_rounds,
     )
-    loop_cost_rmb += estimated_review_cost_rmb
+    loop_cost_rmb += review_cost_rmb
     if not _critique_requires_revision(report, policy):
         return current
 
     for revision_round in range(1, policy.max_revision_rounds + 1):
-        if loop_cost_rmb + estimated_revision_cost_rmb > policy.max_revision_cost_rmb:
+        if loop_cost_rmb + revision_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
             break
         current = await producer.revise_with_critique(
@@ -153,8 +166,8 @@ async def _review_and_maybe_revise(
             critique=report,
             context=context,
         )
-        loop_cost_rmb += estimated_revision_cost_rmb
-        if loop_cost_rmb + estimated_review_cost_rmb > policy.max_revision_cost_rmb:
+        loop_cost_rmb += revision_cost_rmb
+        if loop_cost_rmb + review_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
             break
         report = await critic.review(
@@ -166,7 +179,7 @@ async def _review_and_maybe_revise(
             revision_round=revision_round,
             max_revision_rounds=policy.max_revision_rounds,
         )
-        loop_cost_rmb += estimated_review_cost_rmb
+        loop_cost_rmb += review_cost_rmb
         if not _critique_requires_revision(report, policy):
             return current
 
@@ -207,11 +220,18 @@ async def _review_and_maybe_rerun_coder(
         revision_round=0,
         max_revision_rounds=policy.max_revision_rounds,
     )
+    loop_cost_rmb = policy.estimated_review_cost_rmb
     if not _critique_requires_revision(report, policy):
         return coder_out
 
     current = coder_out
     for revision_round in range(1, policy.max_revision_rounds + 1):
+        if (
+            loop_cost_rmb + policy.estimated_coder_revision_cost_rmb
+            > policy.max_revision_cost_rmb
+        ):
+            report.budget_exhausted = True
+            break
         revision_problem = CoderAgent.build_revision_problem(
             problem=problem,
             analysis=analysis,
@@ -225,6 +245,13 @@ async def _review_and_maybe_rerun_coder(
             spec,
             max_iterations=policy.coder_revision_iterations,
         )
+        loop_cost_rmb += policy.estimated_coder_revision_cost_rmb
+        if (
+            loop_cost_rmb + policy.estimated_review_cost_rmb
+            > policy.max_revision_cost_rmb
+        ):
+            report.budget_exhausted = True
+            break
         report = await critic.review(
             target_agent="coder",
             target_schema="CoderOutput",
@@ -234,6 +261,7 @@ async def _review_and_maybe_rerun_coder(
             revision_round=revision_round,
             max_revision_rounds=policy.max_revision_rounds,
         )
+        loop_cost_rmb += policy.estimated_review_cost_rmb
         if not _critique_requires_revision(report, policy):
             return current
 

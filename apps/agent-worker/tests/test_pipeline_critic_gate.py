@@ -116,3 +116,11 @@ def test_budget_exhaustion_with_blocking_fails_run() -> None:
     )
 
     assert _critique_should_fail_run(report) is True
+
+
+def test_default_policy_has_active_revision_cost_estimates() -> None:
+    policy = CriticPolicy()
+
+    assert policy.estimated_review_cost_rmb > 0
+    assert policy.estimated_revision_cost_rmb > 0
+    assert policy.estimated_coder_revision_cost_rmb > policy.estimated_revision_cost_rmb

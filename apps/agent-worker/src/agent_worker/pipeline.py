@@ -251,6 +251,29 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             paper = await writer.run_for(
                 problem, analysis, spec, coder_out, findings
             )
+            paper = await _review_and_maybe_revise(
+                critic=critic,
+                producer=writer,
+                target_agent="writer",
+                output=paper,
+                context={
+                    "problem_text": problem.problem_text,
+                    "competition_type": problem.competition_type,
+                    "analysis": analysis.model_dump(mode="json"),
+                    "spec": spec.model_dump(mode="json"),
+                    "coder_output": coder_out.model_dump(mode="json"),
+                    "search_findings": findings.model_dump(mode="json"),
+                },
+                criteria=[
+                    "Abstract follows award-mode numeric-result rules.",
+                    "Every problem sub-question is answered explicitly.",
+                    "Sensitivity analysis and strengths/weaknesses are present when applicable.",
+                    "References are sufficient and cited in the body.",
+                    "Figures are referenced using known figure ids and discussed with numbers.",
+                    "No school, student, or identifying team information appears.",
+                ],
+            )
+            assert isinstance(paper, PaperDraft)
 
             # Resolve `[[FIG:<id>]]` placeholders in the Writer's output:
             # the on-disk paper.md gets real markdown image syntax (for the

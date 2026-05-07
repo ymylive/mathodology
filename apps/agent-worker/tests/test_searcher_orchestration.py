@@ -139,9 +139,13 @@ class _Stubs:
 
     def __init__(self) -> None:
         self.arxiv_calls = 0
+        self.openalex_calls = 0
+        self.crossref_calls = 0
         self.tavily_calls = 0
         self.web_calls = 0
         self.arxiv_return: dict[str, list[Paper]] = {}
+        self.openalex_return: dict[str, list[Paper]] = {}
+        self.crossref_return: dict[str, list[Paper]] = {}
         self.tavily_return: dict[str, list[TavilyResult]] = {}
         self.web_return: dict[str, list[WebResult]] = {}
 
@@ -149,6 +153,14 @@ class _Stubs:
         async def fake_arxiv(queries, max_per_query=5, concurrency=2):  # noqa: ANN001
             self.arxiv_calls += 1
             return {q: self.arxiv_return.get(q, []) for q in queries}
+
+        async def fake_openalex(queries, **_):  # noqa: ANN001, ANN003
+            self.openalex_calls += 1
+            return {q: self.openalex_return.get(q, []) for q in queries}
+
+        async def fake_crossref(queries, **_):  # noqa: ANN001, ANN003
+            self.crossref_calls += 1
+            return {q: self.crossref_return.get(q, []) for q in queries}
 
         async def fake_tavily(queries, api_key, **_):  # noqa: ANN001, ANN003
             self.tavily_calls += 1
@@ -160,6 +172,12 @@ class _Stubs:
 
         monkeypatch.setattr(
             "agent_worker.agents.searcher.batch_search_arxiv", fake_arxiv
+        )
+        monkeypatch.setattr(
+            "agent_worker.agents.searcher.batch_search_openalex", fake_openalex
+        )
+        monkeypatch.setattr(
+            "agent_worker.agents.searcher.batch_search_crossref", fake_crossref
         )
         monkeypatch.setattr(
             "agent_worker.agents.searcher.batch_search_tavily", fake_tavily

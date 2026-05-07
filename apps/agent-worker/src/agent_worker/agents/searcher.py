@@ -47,6 +47,8 @@ from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.prompts import load_prompt
 from agent_worker.tools.arxiv import batch_search_arxiv
+from agent_worker.tools.crossref import batch_search_crossref
+from agent_worker.tools.openalex import batch_search_openalex
 from agent_worker.tools.tavily import TavilyResult, batch_search_tavily
 from agent_worker.tools.web_search_mcp import WebResult, batch_search_web
 
@@ -165,10 +167,12 @@ class SearcherAgent:
         web_disabled = settings.open_websearch_disabled or not engines
         primary = search_cfg.primary
 
-        # Phase 2b: arXiv always runs. It goes in parallel with the primary
-        # web source (Tavily or open-webSearch). The fallback (if any) runs
-        # sequentially AFTER the primary, because we only know whether to
-        # invoke it once we've counted the primary's unique hits.
+        # Phase 2b: scholarly sources (arXiv + OpenAlex + Crossref) always
+        # run in parallel with the primary web source. Each is independently
+        # best-effort: a single source 429ing or 5xxing degrades to an empty
+        # dict, so the Searcher never goes silent unless every source fails.
+        # The web fallback (if any) runs sequentially AFTER the primary —
+        # we only know whether to invoke it once we've counted primary hits.
         async def _safe_arxiv() -> dict[str, list[Paper]]:
             try:
                 return await batch_search_arxiv(
@@ -180,6 +184,48 @@ class SearcherAgent:
                     {
                         "level": "warning",
                         "message": f"arXiv batch failed entirely: {e}",
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                return {}
+
+        async def _safe_openalex() -> dict[str, list[Paper]]:
+            if settings.openalex_disabled:
+                return {}
+            try:
+                return await batch_search_openalex(
+                    queries,
+                    max_per_query=5,
+                    concurrency=4,
+                    mailto=settings.polite_mailto or None,
+                )
+            except Exception as e:  # noqa: BLE001
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "warning",
+                        "message": f"OpenAlex batch failed entirely: {e}",
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                return {}
+
+        async def _safe_crossref() -> dict[str, list[Paper]]:
+            if settings.crossref_disabled:
+                return {}
+            try:
+                return await batch_search_crossref(
+                    queries,
+                    max_per_query=5,
+                    concurrency=4,
+                    mailto=settings.polite_mailto or None,
+                )
+            except Exception as e:  # noqa: BLE001
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "warning",
+                        "message": f"Crossref batch failed entirely: {e}",
                     },
                     agent=self.AGENT_NAME,
                 )
@@ -229,8 +275,9 @@ class SearcherAgent:
                 )
                 return {}
 
-        # Decide which "primary" source to run in parallel with arXiv. Empty
-        # dicts mean "not selected"; that simplifies the merge below.
+        # Decide which "primary" web source to run in parallel with the
+        # scholarly trio (arXiv + OpenAlex + Crossref). Empty dicts mean "not
+        # selected"; that simplifies the merge below.
         tavily_results: dict[str, list[TavilyResult]] = {}
         web_results: dict[str, list[WebResult]] = {}
         effective_primary = primary  # may be auto-demoted below
@@ -250,22 +297,51 @@ class SearcherAgent:
                     },
                     agent=self.AGENT_NAME,
                 )
-                arxiv_results, web_results = await asyncio.gather(
-                    _safe_arxiv(), _safe_web()
+                (
+                    arxiv_results,
+                    openalex_results,
+                    crossref_results,
+                    web_results,
+                ) = await asyncio.gather(
+                    _safe_arxiv(),
+                    _safe_openalex(),
+                    _safe_crossref(),
+                    _safe_web(),
                 )
             else:
-                arxiv_results, tavily_results = await asyncio.gather(
-                    _safe_arxiv(), _safe_tavily()
+                (
+                    arxiv_results,
+                    openalex_results,
+                    crossref_results,
+                    tavily_results,
+                ) = await asyncio.gather(
+                    _safe_arxiv(),
+                    _safe_openalex(),
+                    _safe_crossref(),
+                    _safe_tavily(),
                 )
         elif primary == "open_websearch":
-            arxiv_results, web_results = await asyncio.gather(
-                _safe_arxiv(), _safe_web()
+            (
+                arxiv_results,
+                openalex_results,
+                crossref_results,
+                web_results,
+            ) = await asyncio.gather(
+                _safe_arxiv(),
+                _safe_openalex(),
+                _safe_crossref(),
+                _safe_web(),
             )
         else:  # primary == "none"
-            arxiv_results = await _safe_arxiv()
+            arxiv_results, openalex_results, crossref_results = await asyncio.gather(
+                _safe_arxiv(),
+                _safe_openalex(),
+                _safe_crossref(),
+            )
 
-        # Per-source visibility — each source gets exactly one info log, in
-        # fixed order (arXiv first, then whichever web source ran).
+        # Per-source visibility — each scholarly source gets one info log
+        # (arXiv first, then OpenAlex, then Crossref); the web source logs
+        # below are unchanged.
         await self.emitter.emit(
             "log",
             {
@@ -274,17 +350,62 @@ class SearcherAgent:
             },
             agent=self.AGENT_NAME,
         )
+        await self.emitter.emit(
+            "log",
+            {
+                "level": "info",
+                "message": (
+                    f"OpenAlex returned {sum(len(v) for v in openalex_results.values())} papers"
+                ),
+            },
+            agent=self.AGENT_NAME,
+        )
+        await self.emitter.emit(
+            "log",
+            {
+                "level": "info",
+                "message": (
+                    f"Crossref returned {sum(len(v) for v in crossref_results.values())} papers"
+                ),
+            },
+            agent=self.AGENT_NAME,
+        )
 
-        # Dedupe arXiv by arxiv_id (fallback url).
-        arxiv_papers_flat = [p for ps in arxiv_results.values() for p in ps]
-        seen_arxiv: set[str] = set()
+        # Dedupe scholarly papers across the three sources. Identity keys, in
+        # priority order: arxiv_id, doi, url. Iteration order arXiv → OpenAlex
+        # → Crossref so an arXiv preprint that also appears as a published
+        # version in OpenAlex/Crossref is kept under its arXiv URL.
+        seen_scholarly: set[str] = set()
         unique_arxiv: list[Paper] = []
-        for p in arxiv_papers_flat:
-            key = p.arxiv_id or p.url
-            if key in seen_arxiv:
-                continue
-            seen_arxiv.add(key)
-            unique_arxiv.append(p)
+        unique_openalex: list[Paper] = []
+        unique_crossref: list[Paper] = []
+
+        def _scholar_keys(paper: Paper) -> list[str]:
+            keys: list[str] = []
+            if paper.arxiv_id:
+                keys.append(f"arxiv:{paper.arxiv_id}")
+            if paper.doi:
+                keys.append(f"doi:{paper.doi.lower()}")
+            keys.append(f"url:{paper.url}")
+            return keys
+
+        def _take_unique(
+            papers_dict: dict[str, list[Paper]], dest: list[Paper]
+        ) -> None:
+            for ps in papers_dict.values():
+                for p in ps:
+                    keys = _scholar_keys(p)
+                    if any(k in seen_scholarly for k in keys):
+                        continue
+                    seen_scholarly.update(keys)
+                    dest.append(p)
+
+        _take_unique(arxiv_results, unique_arxiv)
+        _take_unique(openalex_results, unique_openalex)
+        _take_unique(crossref_results, unique_crossref)
+        unique_scholarly: list[Paper] = (
+            unique_arxiv + unique_openalex + unique_crossref
+        )
 
         # Unique-URL dedupe shared across Tavily + web hits. Web dedupe has
         # to span the fallback hop too — otherwise a site returned by both
@@ -362,7 +483,7 @@ class SearcherAgent:
                 agent=self.AGENT_NAME,
             )
 
-        unique: list[Paper] = unique_arxiv + tavily_papers + web_papers
+        unique: list[Paper] = unique_scholarly + tavily_papers + web_papers
 
         await self.emitter.emit(
             "log",
@@ -373,6 +494,8 @@ class SearcherAgent:
                 "message": (
                     f"retrieved {len(unique)} unique papers "
                     f"(arXiv={len(unique_arxiv)}, "
+                    f"openalex={len(unique_openalex)}, "
+                    f"crossref={len(unique_crossref)}, "
                     f"tavily={len(tavily_papers)}, "
                     f"web={len(web_papers)}) "
                     f"across {len(queries)} queries"
@@ -381,15 +504,18 @@ class SearcherAgent:
             agent=self.AGENT_NAME,
         )
 
-        # Phase 3: LLM synthesis. If arXiv returned nothing across the board,
-        # skip the LLM and emit a minimal SearchFindings — no point asking the
-        # model to curate an empty list.
+        # Phase 3: LLM synthesis. If every source came back empty (arXiv +
+        # OpenAlex + Crossref + tavily/web), skip the LLM and emit a minimal
+        # SearchFindings — no point asking the model to curate an empty list.
         if not unique:
             await self.emitter.emit(
                 "log",
                 {
                     "level": "warning",
-                    "message": "arXiv returned 0 papers; emitting empty SearchFindings",
+                    "message": (
+                        "all search sources returned 0 papers; "
+                        "emitting empty SearchFindings"
+                    ),
                 },
                 agent=self.AGENT_NAME,
             )

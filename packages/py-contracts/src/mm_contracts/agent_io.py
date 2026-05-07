@@ -430,8 +430,9 @@ class Paper(BaseModel):
     title: str
     authors: list[str] = Field(default_factory=list, max_length=20)
     abstract: str = ""  # may be empty if unavailable
-    url: str  # canonical arXiv abs URL
+    url: str  # arXiv abs URL, doi.org URL (OpenAlex/Crossref), or other source URL
     arxiv_id: str | None = None  # e.g. "2312.01234"
+    doi: str | None = None  # set for OpenAlex/Crossref hits; used for cross-source dedupe
     published: str | None = None  # ISO 8601 date
     relevance_reason: str | None = None  # LLM-assigned, why it matters here
 

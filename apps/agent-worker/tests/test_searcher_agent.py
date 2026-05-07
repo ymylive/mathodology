@@ -121,14 +121,20 @@ async def test_searcher_emits_expected_events(
     async def fake_batch(queries, max_per_query=5, concurrency=2):  # noqa: ANN001
         return {q: papers for q in queries[:1]} | {q: [] for q in queries[1:]}
 
-    async def fake_web(queries, **_):  # noqa: ANN001, ANN003
+    async def fake_empty(queries, **_):  # noqa: ANN001, ANN003
         return {q: [] for q in queries}
 
     monkeypatch.setattr(
         "agent_worker.agents.searcher.batch_search_arxiv", fake_batch
     )
     monkeypatch.setattr(
-        "agent_worker.agents.searcher.batch_search_web", fake_web
+        "agent_worker.agents.searcher.batch_search_openalex", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_crossref", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_web", fake_empty
     )
 
     gateway = _FakeGateway([_FINDINGS_JSON])
@@ -172,14 +178,20 @@ async def test_searcher_degrades_when_arxiv_empty(
     async def fake_batch_empty(queries, max_per_query=5, concurrency=2):  # noqa: ANN001
         return {q: [] for q in queries}
 
-    async def fake_web_empty(queries, **_):  # noqa: ANN001, ANN003
+    async def fake_empty(queries, **_):  # noqa: ANN001, ANN003
         return {q: [] for q in queries}
 
     monkeypatch.setattr(
         "agent_worker.agents.searcher.batch_search_arxiv", fake_batch_empty
     )
     monkeypatch.setattr(
-        "agent_worker.agents.searcher.batch_search_web", fake_web_empty
+        "agent_worker.agents.searcher.batch_search_openalex", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_crossref", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_web", fake_empty
     )
 
     # Gateway should never be called — assert that by failing the stream.
@@ -218,14 +230,20 @@ async def test_searcher_degrades_when_arxiv_raises(
     async def fake_batch_raises(queries, max_per_query=5, concurrency=2):  # noqa: ANN001
         raise RuntimeError("network down")
 
-    async def fake_web_empty(queries, **_):  # noqa: ANN001, ANN003
+    async def fake_empty(queries, **_):  # noqa: ANN001, ANN003
         return {q: [] for q in queries}
 
     monkeypatch.setattr(
         "agent_worker.agents.searcher.batch_search_arxiv", fake_batch_raises
     )
     monkeypatch.setattr(
-        "agent_worker.agents.searcher.batch_search_web", fake_web_empty
+        "agent_worker.agents.searcher.batch_search_openalex", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_crossref", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_web", fake_empty
     )
 
     class _NoopGateway:

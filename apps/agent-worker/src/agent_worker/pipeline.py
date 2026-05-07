@@ -25,13 +25,24 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from mm_contracts import Figure, PaperDraft, ProblemInput
+from mm_contracts import (
+    AnalyzerOutput,
+    CoderOutput,
+    CritiqueReport,
+    Figure,
+    ModelSpec,
+    PaperDraft,
+    ProblemInput,
+)
+from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from agent_worker.agents import (
     AgentError,
     AnalyzerAgent,
+    BaseAgent,
     CoderAgent,
+    CriticAgent,
     ModelerAgent,
     SearcherAgent,
     WriterAgent,
@@ -43,6 +54,7 @@ from agent_worker.hmml import HMMLService
 from agent_worker.kernel import KernelSession
 
 _log = logging.getLogger(__name__)
+MAX_CRITIC_REVISIONS = 1
 
 
 @lru_cache(maxsize=1)
@@ -57,6 +69,54 @@ def _get_hmml() -> HMMLService | None:
         _log.warning("HMML seed dir is empty; Modeler will run without it.")
         return None
     return service
+
+
+def _critique_requires_revision(report: CritiqueReport) -> bool:
+    if report.passed:
+        return False
+    return report.has_blocking_findings or report.has_major_findings
+
+
+def _critique_should_fail_run(report: CritiqueReport) -> bool:
+    return (not report.passed) and report.has_blocking_findings
+
+
+async def _review_and_maybe_revise(
+    *,
+    critic: CriticAgent,
+    producer: BaseAgent,
+    target_agent: str,
+    output: BaseModel,
+    context: dict[str, Any],
+    criteria: list[str],
+) -> BaseModel:
+    report = await critic.review(
+        target_agent=target_agent,  # type: ignore[arg-type]
+        target_schema=type(output).__name__,
+        artifact=output.model_dump(mode="json"),
+        context=context,
+        criteria=criteria,
+    )
+    if not _critique_requires_revision(report):
+        return output
+
+    revised = await producer.revise_with_critique(
+        original_output=output,
+        critique=report,
+        context=context,
+    )
+    followup = await critic.review(
+        target_agent=target_agent,  # type: ignore[arg-type]
+        target_schema=type(revised).__name__,
+        artifact=revised.model_dump(mode="json"),
+        context=context,
+        criteria=criteria,
+    )
+    if _critique_should_fail_run(followup):
+        raise AgentError(
+            f"Critic rejected {target_agent} after revision: {followup.summary}"
+        )
+    return revised
 
 
 async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> None:

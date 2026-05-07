@@ -210,31 +210,36 @@ async def _review_and_maybe_rerun_coder(
     if not _critique_requires_revision(report, policy):
         return coder_out
 
-    revision_problem = CoderAgent.build_revision_problem(
-        problem=problem,
-        analysis=analysis,
-        spec=spec,
-        original_output=coder_out,
-        critique=report,
-    )
-    revised = await coder.run(
-        revision_problem,
-        analysis,
-        spec,
-        max_iterations=policy.coder_revision_iterations,
-    )
-    followup = await critic.review(
-        target_agent="coder",
-        target_schema="CoderOutput",
-        artifact=revised.model_dump(mode="json"),
-        context=context,
-        criteria=criteria,
-        revision_round=1,
-        max_revision_rounds=policy.max_revision_rounds,
-    )
-    if _critique_should_fail_run(followup):
-        raise AgentError(f"Critic rejected coder after revision: {followup.summary}")
-    return revised
+    current = coder_out
+    for revision_round in range(1, policy.max_revision_rounds + 1):
+        revision_problem = CoderAgent.build_revision_problem(
+            problem=problem,
+            analysis=analysis,
+            spec=spec,
+            original_output=current,
+            critique=report,
+        )
+        current = await coder.run(
+            revision_problem,
+            analysis,
+            spec,
+            max_iterations=policy.coder_revision_iterations,
+        )
+        report = await critic.review(
+            target_agent="coder",
+            target_schema="CoderOutput",
+            artifact=current.model_dump(mode="json"),
+            context=context,
+            criteria=criteria,
+            revision_round=revision_round,
+            max_revision_rounds=policy.max_revision_rounds,
+        )
+        if not _critique_requires_revision(report, policy):
+            return current
+
+    if _critique_should_fail_run(report):
+        raise AgentError(f"Critic rejected coder after revision: {report.summary}")
+    return current
 
 
 async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> None:

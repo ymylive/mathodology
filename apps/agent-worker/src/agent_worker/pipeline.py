@@ -119,6 +119,56 @@ async def _review_and_maybe_revise(
     return revised
 
 
+async def _review_and_maybe_rerun_coder(
+    *,
+    critic: CriticAgent,
+    coder: CoderAgent,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
+    coder_out: CoderOutput,
+) -> CoderOutput:
+    criteria = [
+        "Executed cells support the model specification.",
+        "Output contains concrete numerical results.",
+        "Validation or sensitivity evidence is present where applicable.",
+        "Figures are registered with ids, captions, and valid paths.",
+    ]
+    context = {
+        "problem_text": problem.problem_text,
+        "analysis": analysis.model_dump(mode="json"),
+        "spec": spec.model_dump(mode="json"),
+    }
+    report = await critic.review(
+        target_agent="coder",
+        target_schema="CoderOutput",
+        artifact=coder_out.model_dump(mode="json"),
+        context=context,
+        criteria=criteria,
+    )
+    if not _critique_requires_revision(report):
+        return coder_out
+
+    revision_problem = CoderAgent.build_revision_problem(
+        problem=problem,
+        analysis=analysis,
+        spec=spec,
+        original_output=coder_out,
+        critique=report,
+    )
+    revised = await coder.run(revision_problem, analysis, spec)
+    followup = await critic.review(
+        target_agent="coder",
+        target_schema="CoderOutput",
+        artifact=revised.model_dump(mode="json"),
+        context=context,
+        criteria=criteria,
+    )
+    if _critique_should_fail_run(followup):
+        raise AgentError(f"Critic rejected coder after revision: {followup.summary}")
+    return revised
+
+
 async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> None:
     """Run the full 4-agent pipeline. Emit terminal `done` with paths + status."""
     settings = get_settings()
@@ -188,6 +238,14 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
 
             coder = CoderAgent(gateway, emitter, kernel, **kwargs)
             coder_out = await coder.run(problem, analysis, spec)
+            coder_out = await _review_and_maybe_rerun_coder(
+                critic=critic,
+                coder=coder,
+                problem=problem,
+                analysis=analysis,
+                spec=spec,
+                coder_out=coder_out,
+            )
 
             writer = WriterAgent(gateway, emitter, **kwargs)
             paper = await writer.run_for(

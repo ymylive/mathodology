@@ -20,6 +20,7 @@ from mm_contracts import (
     AnalyzerOutput,
     CellExecution,
     CoderOutput,
+    CritiqueReport,
     Figure,
     ModelSpec,
     ProblemInput,
@@ -346,6 +347,43 @@ class CoderAgent:
     def _render_execution_feedback(cell: CellExecution) -> str:  # noqa: D401
         # See comment below in _trim_spec_for_coder for context.
         return _render_feedback(cell)
+
+    @staticmethod
+    def build_revision_problem(
+        *,
+        problem: ProblemInput,
+        analysis: AnalyzerOutput,
+        spec: ModelSpec,
+        original_output: CoderOutput,
+        critique: CritiqueReport,
+    ) -> ProblemInput:
+        """Create a bounded corrective coding task from a Critic report."""
+        critique_json = critique.model_dump_json(indent=2)
+        cells_summary = [
+            {
+                "index": cell.index,
+                "source": cell.source,
+                "stdout": cell.stdout[:500],
+                "stderr": cell.stderr[:500],
+                "error": cell.error,
+                "figure_paths": cell.figure_paths,
+            }
+            for cell in original_output.cells[-5:]
+        ]
+        revised_text = (
+            f"{problem.problem_text}\n\n"
+            "Critic requested one corrective Coder pass. Keep all valid prior "
+            "results, but fix the concrete issues below. Produce a complete "
+            "replacement notebook output, not a prose-only response.\n\n"
+            f"Analysis JSON:\n{analysis.model_dump_json(indent=2)}\n\n"
+            f"Trimmed model spec JSON:\n"
+            f"{json.dumps(_trim_spec_for_coder(spec), ensure_ascii=False, indent=2)}\n\n"
+            f"Previous Coder summary:\n{original_output.final_summary}\n\n"
+            f"Recent executed cells JSON:\n"
+            f"{json.dumps(cells_summary, ensure_ascii=False, indent=2)}\n\n"
+            f"Critique JSON:\n{critique_json}"
+        )
+        return problem.model_copy(update={"problem_text": revised_text})
 
 
 def _trim_spec_for_coder(spec: ModelSpec) -> dict[str, Any]:

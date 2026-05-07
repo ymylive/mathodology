@@ -134,6 +134,49 @@ class AgentEvent(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Critic agent
+# ---------------------------------------------------------------------------
+
+
+CritiqueSeverity = Literal["info", "minor", "major", "blocking"]
+ReviewTargetAgent = Literal["analyzer", "modeler", "coder", "writer"]
+
+
+class CritiqueFinding(BaseModel):
+    """One concrete issue found by the Critic."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    severity: CritiqueSeverity
+    area: str
+    message: str
+    evidence: str
+    required_change: str
+
+
+class CritiqueReport(BaseModel):
+    """Structured Critic output for one reviewed agent artifact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_agent: ReviewTargetAgent
+    target_schema: str
+    passed: bool
+    score: float = Field(ge=0.0, le=1.0)
+    summary: str
+    findings: list[CritiqueFinding] = Field(default_factory=list, max_length=20)
+    required_changes: list[str] = Field(default_factory=list, max_length=20)
+
+    @property
+    def has_blocking_findings(self) -> bool:
+        return any(f.severity == "blocking" for f in self.findings)
+
+    @property
+    def has_major_findings(self) -> bool:
+        return any(f.severity == "major" for f in self.findings)
+
+
+# ---------------------------------------------------------------------------
 # Cost / token accounting
 # ---------------------------------------------------------------------------
 

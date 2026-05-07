@@ -162,6 +162,7 @@ async def _review_and_maybe_rerun_coder(
     analysis: AnalyzerOutput,
     spec: ModelSpec,
     coder_out: CoderOutput,
+    policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
 ) -> CoderOutput:
     criteria = [
         "Executed cells support the model specification.",
@@ -180,8 +181,10 @@ async def _review_and_maybe_rerun_coder(
         artifact=coder_out.model_dump(mode="json"),
         context=context,
         criteria=criteria,
+        revision_round=0,
+        max_revision_rounds=policy.max_revision_rounds,
     )
-    if not _critique_requires_revision(report):
+    if not _critique_requires_revision(report, policy):
         return coder_out
 
     revision_problem = CoderAgent.build_revision_problem(
@@ -191,13 +194,20 @@ async def _review_and_maybe_rerun_coder(
         original_output=coder_out,
         critique=report,
     )
-    revised = await coder.run(revision_problem, analysis, spec)
+    revised = await coder.run(
+        revision_problem,
+        analysis,
+        spec,
+        max_iterations=policy.coder_revision_iterations,
+    )
     followup = await critic.review(
         target_agent="coder",
         target_schema="CoderOutput",
         artifact=revised.model_dump(mode="json"),
         context=context,
         criteria=criteria,
+        revision_round=1,
+        max_revision_rounds=policy.max_revision_rounds,
     )
     if _critique_should_fail_run(followup):
         raise AgentError(f"Critic rejected coder after revision: {followup.summary}")

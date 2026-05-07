@@ -97,6 +97,7 @@ class CoderAgent:
         problem: ProblemInput,
         analysis: AnalyzerOutput,
         spec: ModelSpec,
+        max_iterations: int = MAX_ITERATIONS,
     ) -> CoderOutput:
         """Execute the agent loop end-to-end; always emits stage lifecycle events."""
         t0 = time.monotonic()
@@ -136,7 +137,7 @@ class CoderAgent:
         final_summary: str | None = None
 
         try:
-            for i in range(MAX_ITERATIONS):
+            for i in range(max_iterations):
                 directive = await self._ask_llm(model, messages)
 
                 await self.emitter.emit(
@@ -185,9 +186,9 @@ class CoderAgent:
                 if directive.done:
                     final_summary = directive.summary or "(no summary provided)"
                     break
-                if cell.error and i == MAX_ITERATIONS - 1:
+                if cell.error and i == max_iterations - 1:
                     final_summary = (
-                        f"Coder failed after {MAX_ITERATIONS} attempts: {cell.error}"
+                        f"Coder failed after {max_iterations} attempts: {cell.error}"
                     )
                     break
 

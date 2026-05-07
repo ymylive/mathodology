@@ -139,7 +139,8 @@ class AgentEvent(BaseModel):
 
 
 CritiqueSeverity = Literal["info", "minor", "major", "blocking"]
-ReviewTargetAgent = Literal["analyzer", "modeler", "coder", "writer"]
+CriticRole = Literal["modeling_coach", "academic_reviewer", "code_reviewer"]
+ReviewTargetAgent = Literal["analyzer", "searcher", "modeler", "coder", "writer"]
 
 
 class CritiqueFinding(BaseModel):
@@ -154,6 +155,29 @@ class CritiqueFinding(BaseModel):
     required_change: str
 
 
+class CritiqueChecklistItem(BaseModel):
+    """One deterministic checklist item reviewed by one or more critic roles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    label: str
+    passed: bool
+    evidence: str
+
+
+class RoleCritique(BaseModel):
+    """A specialist critic role's verdict on the reviewed artifact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: CriticRole
+    passed: bool
+    score: float = Field(ge=0.0, le=1.0)
+    summary: str
+    findings: list[CritiqueFinding] = Field(default_factory=list, max_length=20)
+
+
 class CritiqueReport(BaseModel):
     """Structured Critic output for one reviewed agent artifact."""
 
@@ -166,14 +190,37 @@ class CritiqueReport(BaseModel):
     summary: str
     findings: list[CritiqueFinding] = Field(default_factory=list, max_length=20)
     required_changes: list[str] = Field(default_factory=list, max_length=20)
+    roles: list[RoleCritique] = Field(default_factory=list, max_length=5)
+    checklist: list[CritiqueChecklistItem] = Field(default_factory=list, max_length=30)
+    revision_round: int = Field(default=0, ge=0)
+    max_revision_rounds: int = Field(default=0, ge=0)
+    budget_exhausted: bool = False
 
     @property
     def has_blocking_findings(self) -> bool:
-        return any(f.severity == "blocking" for f in self.findings)
+        return any(f.severity == "blocking" for f in self.all_findings)
 
     @property
     def has_major_findings(self) -> bool:
-        return any(f.severity == "major" for f in self.findings)
+        return self.major_finding_count > 0
+
+    @property
+    def all_findings(self) -> list[CritiqueFinding]:
+        return [
+            *self.findings,
+            *(finding for role in self.roles for finding in role.findings),
+        ]
+
+    @property
+    def major_finding_count(self) -> int:
+        return sum(1 for f in self.all_findings if f.severity == "major")
+
+    @property
+    def checklist_pass_rate(self) -> float:
+        if not self.checklist:
+            return 1.0
+        passed = sum(1 for item in self.checklist if item.passed)
+        return passed / len(self.checklist)
 
 
 # ---------------------------------------------------------------------------

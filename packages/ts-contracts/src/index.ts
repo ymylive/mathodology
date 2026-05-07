@@ -33,7 +33,16 @@ export interface AgentEvent {
 }
 
 export type CritiqueSeverity = "info" | "minor" | "major" | "blocking";
-export type ReviewTargetAgent = "analyzer" | "modeler" | "coder" | "writer";
+export type CriticRole =
+  | "modeling_coach"
+  | "academic_reviewer"
+  | "code_reviewer";
+export type ReviewTargetAgent =
+  | "analyzer"
+  | "searcher"
+  | "modeler"
+  | "coder"
+  | "writer";
 
 export interface CritiqueFinding {
   severity: CritiqueSeverity;
@@ -41,6 +50,21 @@ export interface CritiqueFinding {
   message: string;
   evidence: string;
   required_change: string;
+}
+
+export interface CritiqueChecklistItem {
+  id: string;
+  label: string;
+  passed: boolean;
+  evidence: string;
+}
+
+export interface RoleCritique {
+  role: CriticRole;
+  passed: boolean;
+  score: number;
+  summary: string;
+  findings: CritiqueFinding[];
 }
 
 export interface CritiqueReport {
@@ -51,6 +75,11 @@ export interface CritiqueReport {
   summary: string;
   findings: CritiqueFinding[];
   required_changes: string[];
+  roles?: RoleCritique[];
+  checklist?: CritiqueChecklistItem[];
+  revision_round?: number;
+  max_revision_rounds?: number;
+  budget_exhausted?: boolean;
 }
 
 // Hand-written figure / paper-meta shapes. Mirrors

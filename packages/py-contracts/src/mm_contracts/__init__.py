@@ -8,6 +8,8 @@ from mm_contracts.agent_io import (
     CellExecution,
     CoderOutput,
     ConsultedMethod,
+    CriticRole,
+    CritiqueChecklistItem,
     CritiqueFinding,
     CritiqueReport,
     DataRequirement,
@@ -27,6 +29,7 @@ from mm_contracts.agent_io import (
     SearchPrimary,
     TokenUsage,
     Variable,
+    RoleCritique,
 )
 
 __all__ = [
@@ -37,6 +40,8 @@ __all__ = [
     "CellExecution",
     "CoderOutput",
     "ConsultedMethod",
+    "CriticRole",
+    "CritiqueChecklistItem",
     "CritiqueFinding",
     "CritiqueReport",
     "DataRequirement",
@@ -56,4 +61,5 @@ __all__ = [
     "SearchPrimary",
     "TokenUsage",
     "Variable",
+    "RoleCritique",
 ]

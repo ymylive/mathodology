@@ -2,7 +2,7 @@
 
 ## Goal
 
-Phase 4 turns the current five-agent pipeline into a reviewed pipeline. Each major agent output is checked by a Critic before downstream agents consume it, and failed checks trigger one bounded revision pass using the Critic's structured feedback.
+Phase 4 turns the current five-agent pipeline into a reviewed pipeline. Phase 4 MVP checked major stage outputs with a single Critic pass. Phase 4.1 upgrades that into a multi-role post-output Critic loop with deterministic thresholds, bounded self-refine rounds, and Coder iteration coordination.
 
 ## Current State
 
@@ -10,26 +10,30 @@ The repository currently runs:
 
 `Analyzer -> Searcher -> Modeler -> Coder -> Writer`
 
-`critic` is already present in the shared event agent enum, but there is no `CriticAgent`, critic prompt, critique data model, pipeline integration, UI stage, or test coverage. Phase 4 therefore starts from protocol reservation, not from a partial implementation.
+The repository now has a `CriticAgent`, structured critique contracts, pipeline gates, UI rendering, and tests. Phase 4.1 builds on that shipped branch state rather than starting from protocol reservation.
 
 ## Functional Scope
 
-Phase 4 ships the smallest useful critic system:
+Phase 4.1 ships the stricter critic system:
 
-1. A structured `CritiqueReport` contract with pass/fail, severity, findings, required changes, and optional revised-output hints.
-2. A reusable `CriticAgent` that reviews one artifact at a time against stage-specific criteria.
-3. A `revise_with_critique` capability for LLM-backed agents that asks the producing agent to revise its own JSON output once.
-4. Pipeline gates after Analyzer, Modeler, Coder, and Writer.
-5. Stage events and UI support for critic runs so users can see review progress and final findings.
-6. Tests that prove both paths: accepted output continues unchanged, rejected output is revised before downstream consumption.
-
-Searcher is excluded from the first Phase 4 implementation because its external-source failure behavior already degrades gracefully and its output is advisory for Writer. It can be reviewed later if needed.
+1. A structured `CritiqueReport` contract with pass/fail, severity, findings, required changes, role reviews, checklist items, revision metadata, and budget exhaustion.
+2. A reusable `CriticAgent` that reviews one artifact at a time using target-specific roles.
+3. A `revise_with_critique` capability for Analyzer, Searcher, Modeler, and Writer structured outputs.
+4. Pipeline gates after Analyzer, Searcher, Modeler, Coder, and Writer.
+5. A bounded `critique -> revise -> critique` loop with default two revision rounds.
+6. Deterministic thresholds: score, checklist pass rate, blocking findings, and major finding counts.
+7. Coder corrective passes capped separately from the award-mode `MAX_ITER=7` loop.
+8. Stage events and UI support for role-based critic reports.
 
 ## Review Gates
 
 ### Analyzer Gate
 
 Checks that the analysis covers all problem sub-questions, states assumptions, lists data needs, and proposes usable approaches. A failed critique asks Analyzer to revise `AnalyzerOutput`.
+
+### Searcher Gate
+
+Checks source quality, citation coverage, relevance, and empty-result handling. A failed critique asks Searcher to revise `SearchFindings` without re-running external search tools or inventing new sources.
 
 ### Modeler Gate
 
@@ -62,6 +66,11 @@ Add to `mm_contracts.agent_io`:
   - `summary`
   - `findings`
   - `required_changes`
+  - `roles`
+  - `checklist`
+  - `revision_round`
+  - `max_revision_rounds`
+  - `budget_exhausted`
 
 The report is strict JSON with `extra="forbid"` to keep UI and pipeline behavior stable.
 
@@ -73,12 +82,12 @@ Each reviewed stage follows this pattern:
 2. Run Critic on the output and context.
 3. Emit `agent.output` for `CritiqueReport` under agent `critic`.
 4. If `passed` is true, continue.
-5. If `passed` is false and blocking/major findings exist, run one revision pass.
-6. Critic reviews the revised output once.
-7. If still failed with blocking findings, fail the run with a clear error.
-8. If still failed but only minor findings remain, continue and emit a warning.
+5. If policy thresholds fail, run a bounded revision pass.
+6. Critic reviews the revised output and the loop repeats until pass or budget exhaustion.
+7. If blocking findings remain after the revision budget, fail the run with a clear error.
+8. If the budget is exhausted without blocking findings, continue with the latest revised output and the critique report marks the budget state.
 
-The default maximum revision count is one. This prevents infinite agent loops and keeps cost predictable.
+The default maximum revision count is two. `CriticPolicy` also includes score threshold `0.80`, checklist pass-rate threshold `0.85`, Coder corrective iteration cap `2`, and a local revision-loop cost budget.
 
 ## Frontend Behavior
 
@@ -88,25 +97,28 @@ The Workbench should show Critic as a real stage in the stage pills. Because Cri
 
 - pass/fail status
 - score
+- checklist pass rate
+- revision round / max rounds
+- budget exhaustion marker
 - target agent/schema
 - summary
+- role-specific verdicts
 - findings grouped by severity
 - required changes
 
 ## Out Of Scope
 
-- Multi-round refinement beyond one revision.
-- Separate specialist critics per agent file.
+- Separate specialist critic agent files.
 - Human-in-the-loop approvals.
-- Searcher review.
 - Automatic issue creation from critique failures.
 - Cloud sandbox or production auth changes from Phase 5.
+-- Full real-time DB cost-ledger enforcement inside worker. Phase 4.1 adds a local loop budget interface; gateway cost accounting remains authoritative for run totals.
 
 ## Acceptance Criteria
 
 1. A clean run with passing critiques completes successfully and emits Critic events.
-2. A run with one failed Modeler critique revises the `ModelSpec` and continues with the revised spec.
+2. A run with failed Modeler critiques can revise the `ModelSpec` up to two times and continues with the revised spec when thresholds pass.
 3. A run with unresolved blocking Writer findings fails with a clear run error.
-4. Unit tests cover `CritiqueReport`, `CriticAgent`, revise prompts, and pipeline gate behavior.
-5. Frontend stage pills include Critic and render critique reports.
+4. Unit tests cover `CritiqueReport`, role-aware `CriticAgent`, revise prompts, thresholds, Coder iteration caps, and pipeline gate behavior.
+5. Frontend stage pills include Critic and render role/checklist critique reports.
 6. Existing tests for Analyzer, Modeler, Coder, Writer, Searcher, exports, and contracts remain passing.

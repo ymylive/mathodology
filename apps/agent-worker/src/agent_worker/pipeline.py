@@ -64,6 +64,7 @@ class CriticPolicy:
     min_checklist_pass_rate: float = 0.85
     max_revision_rounds: int = 2
     coder_revision_iterations: int = 2
+    max_revision_cost_rmb: float = 1.00
 
 
 DEFAULT_CRITIC_POLICY = CriticPolicy()
@@ -125,8 +126,11 @@ async def _review_and_maybe_revise(
     context: dict[str, Any],
     criteria: list[str],
     policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
+    estimated_review_cost_rmb: float = 0.0,
+    estimated_revision_cost_rmb: float = 0.0,
 ) -> BaseModel:
     current = output
+    loop_cost_rmb = 0.0
     report = await critic.review(
         target_agent=target_agent,  # type: ignore[arg-type]
         target_schema=type(current).__name__,
@@ -136,15 +140,23 @@ async def _review_and_maybe_revise(
         revision_round=0,
         max_revision_rounds=policy.max_revision_rounds,
     )
+    loop_cost_rmb += estimated_review_cost_rmb
     if not _critique_requires_revision(report, policy):
         return current
 
     for revision_round in range(1, policy.max_revision_rounds + 1):
+        if loop_cost_rmb + estimated_revision_cost_rmb > policy.max_revision_cost_rmb:
+            report.budget_exhausted = True
+            break
         current = await producer.revise_with_critique(
             original_output=current,
             critique=report,
             context=context,
         )
+        loop_cost_rmb += estimated_revision_cost_rmb
+        if loop_cost_rmb + estimated_review_cost_rmb > policy.max_revision_cost_rmb:
+            report.budget_exhausted = True
+            break
         report = await critic.review(
             target_agent=target_agent,  # type: ignore[arg-type]
             target_schema=type(current).__name__,
@@ -154,6 +166,7 @@ async def _review_and_maybe_revise(
             revision_round=revision_round,
             max_revision_rounds=policy.max_revision_rounds,
         )
+        loop_cost_rmb += estimated_review_cost_rmb
         if not _critique_requires_revision(report, policy):
             return current
 

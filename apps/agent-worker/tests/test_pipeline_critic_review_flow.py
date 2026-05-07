@@ -166,6 +166,38 @@ def test_searcher_review_criteria_cover_source_quality_and_empty_results() -> No
     assert "empty" in joined
 
 
+async def test_review_and_maybe_revise_stops_when_cost_budget_is_exhausted() -> None:
+    original = _analysis(["Estimate demand"])
+    producer = _SequenceProducer(
+        [
+            _analysis(["Estimate demand", "Optimize allocation"]),
+            _analysis(["Estimate demand", "Optimize allocation", "Validate robustness"]),
+        ]
+    )
+    critic = _FakeCritic(
+        [
+            _report(False, major=True),
+            _report(False, major=True),
+        ]
+    )
+
+    result = await _review_and_maybe_revise(
+        critic=critic,  # type: ignore[arg-type]
+        producer=producer,  # type: ignore[arg-type]
+        target_agent="analyzer",
+        output=original,
+        context={"problem_text": "Estimate demand and optimize allocation."},
+        criteria=["covers all sub-questions"],
+        policy=CriticPolicy(max_revision_rounds=2, max_revision_cost_rmb=0.04),
+        estimated_review_cost_rmb=0.01,
+        estimated_revision_cost_rmb=0.02,
+    )
+
+    assert result is producer.revisions[0]
+    assert producer.revision_calls == 1
+    assert critic.calls == 2
+
+
 async def test_review_and_maybe_revise_fails_after_budget_with_blocking() -> None:
     original = _analysis(["Estimate demand"])
     producer = _SequenceProducer(

@@ -20,9 +20,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from uuid import UUID
 
@@ -68,6 +70,12 @@ class CriticPolicy:
     estimated_review_cost_rmb: float = 0.02
     estimated_revision_cost_rmb: float = 0.05
     estimated_coder_revision_cost_rmb: float = 0.12
+    min_score_overrides: Mapping[str, float] = field(
+        default_factory=lambda: MappingProxyType({"searcher": 0.75})
+    )
+    min_checklist_pass_rate_overrides: Mapping[str, float] = field(
+        default_factory=lambda: MappingProxyType({"searcher": 0.80})
+    )
 
 
 DEFAULT_CRITIC_POLICY = CriticPolicy()
@@ -96,9 +104,15 @@ def _critique_requires_revision(
         return True
     if report.major_finding_count >= 2:
         return True
-    if report.score < policy.min_score:
+    min_score = policy.min_score_overrides.get(
+        report.target_agent, policy.min_score
+    )
+    if report.score < min_score:
         return True
-    if report.checklist_pass_rate < policy.min_checklist_pass_rate:
+    min_pass_rate = policy.min_checklist_pass_rate_overrides.get(
+        report.target_agent, policy.min_checklist_pass_rate
+    )
+    if report.checklist_pass_rate < min_pass_rate:
         return True
     if report.passed:
         return False

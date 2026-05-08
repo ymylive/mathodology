@@ -15,6 +15,8 @@ def _report(
     score: float = 0.9,
     checklist_passes: list[bool] | None = None,
     budget_exhausted: bool = False,
+    target_agent: str = "analyzer",
+    target_schema: str = "AnalyzerOutput",
 ) -> CritiqueReport:
     findings = []
     if severity is not None:
@@ -37,8 +39,8 @@ def _report(
         for idx, item_passed in enumerate(checklist_passes or [], start=1)
     ]
     return CritiqueReport(
-        target_agent="analyzer",
-        target_schema="AnalyzerOutput",
+        target_agent=target_agent,  # type: ignore[arg-type]
+        target_schema=target_schema,
         passed=passed,
         score=score,
         summary="summary",
@@ -123,3 +125,51 @@ def test_default_policy_has_active_revision_cost_estimates() -> None:
     assert policy.estimated_review_cost_rmb > 0
     assert policy.estimated_revision_cost_rmb > 0
     assert policy.estimated_coder_revision_cost_rmb > policy.estimated_revision_cost_rmb
+
+
+# checklist_pass_rate = 21/25 = 0.84 (between the 0.80 searcher override and
+# the 0.85 uniform default), score 0.78 (between the 0.75 override and the
+# 0.80 default). Both signals cross the override threshold but not the default.
+# Capped at 25 items because CritiqueReport.checklist has max_length=30.
+_SEARCHER_OVERRIDE_PASSES = [True] * 21 + [False] * 4
+
+
+def test_searcher_below_uniform_threshold_passes_with_override() -> None:
+    report = _report(
+        passed=True,
+        score=0.78,
+        checklist_passes=_SEARCHER_OVERRIDE_PASSES,
+        target_agent="searcher",
+        target_schema="SearchFindings",
+    )
+
+    assert _critique_requires_revision(report, CriticPolicy()) is False
+
+
+def test_modeler_below_uniform_threshold_still_requires_revision() -> None:
+    report = _report(
+        passed=True,
+        score=0.78,
+        checklist_passes=_SEARCHER_OVERRIDE_PASSES,
+        target_agent="modeler",
+        target_schema="ModelSpec",
+    )
+
+    assert _critique_requires_revision(report, CriticPolicy()) is True
+
+
+def test_explicit_override_can_be_disabled_per_call() -> None:
+    report = _report(
+        passed=True,
+        score=0.78,
+        checklist_passes=_SEARCHER_OVERRIDE_PASSES,
+        target_agent="searcher",
+        target_schema="SearchFindings",
+    )
+
+    policy = CriticPolicy(
+        min_score_overrides={},
+        min_checklist_pass_rate_overrides={},
+    )
+
+    assert _critique_requires_revision(report, policy) is True

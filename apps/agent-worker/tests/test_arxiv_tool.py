@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 from agent_worker.tools.arxiv import (
     ARXIV_API_URL,
@@ -118,3 +119,65 @@ async def test_batch_search_arxiv_empty_queries() -> None:
 )
 def test_parse_atom_parametrized(xml_payload: str, expected_count: int) -> None:
     assert len(_parse_atom(xml_payload)) == expected_count
+
+
+async def test_search_arxiv_retries_on_429(httpx_mock, monkeypatch):  # type: ignore[no-untyped-def]
+    """429 then 200 must succeed within budget."""
+    sleeps: list[float] = []
+
+    async def fake_sleep(s: float) -> None:
+        sleeps.append(s)
+
+    monkeypatch.setattr("agent_worker.tools.arxiv.asyncio.sleep", fake_sleep)
+    httpx_mock.add_response(status_code=429)
+    httpx_mock.add_response(text=_SAMPLE_ATOM)
+    papers = await search_arxiv("queueing", max_results=5)
+    assert len(papers) == 2  # _SAMPLE_ATOM has 2 entries
+    assert len(sleeps) == 1  # one backoff between attempts
+    assert 0.7 <= sleeps[0] <= 1.3  # base 1.0s ±30%
+
+
+async def test_search_arxiv_retries_on_503(httpx_mock, monkeypatch):  # type: ignore[no-untyped-def]
+    async def fake_sleep(s: float) -> None: ...
+
+    monkeypatch.setattr("agent_worker.tools.arxiv.asyncio.sleep", fake_sleep)
+    httpx_mock.add_response(status_code=503)
+    httpx_mock.add_response(text=_SAMPLE_ATOM)
+    papers = await search_arxiv("anything", max_results=5)
+    assert len(papers) == 2
+
+
+async def test_search_arxiv_retries_on_transient_network_error(httpx_mock, monkeypatch):  # type: ignore[no-untyped-def]
+    async def fake_sleep(s: float) -> None: ...
+
+    monkeypatch.setattr("agent_worker.tools.arxiv.asyncio.sleep", fake_sleep)
+    httpx_mock.add_exception(httpx.ConnectError("boom"))
+    httpx_mock.add_response(text=_SAMPLE_ATOM)
+    papers = await search_arxiv("anything")
+    assert len(papers) == 2
+
+
+async def test_search_arxiv_gives_up_after_max_retries(httpx_mock, monkeypatch):  # type: ignore[no-untyped-def]
+    """Four consecutive 429s exhaust retries; last raises."""
+
+    async def fake_sleep(s: float) -> None: ...
+
+    monkeypatch.setattr("agent_worker.tools.arxiv.asyncio.sleep", fake_sleep)
+    for _ in range(4):
+        httpx_mock.add_response(status_code=429)
+    with pytest.raises(httpx.HTTPStatusError):
+        await search_arxiv("anything")
+
+
+async def test_search_arxiv_does_not_retry_on_400(httpx_mock, monkeypatch):  # type: ignore[no-untyped-def]
+    """Non-transient client error propagates immediately."""
+    sleeps: list[float] = []
+
+    async def fake_sleep(s: float) -> None:
+        sleeps.append(s)
+
+    monkeypatch.setattr("agent_worker.tools.arxiv.asyncio.sleep", fake_sleep)
+    httpx_mock.add_response(status_code=400)
+    with pytest.raises(httpx.HTTPStatusError):
+        await search_arxiv("anything")
+    assert sleeps == []  # no backoff

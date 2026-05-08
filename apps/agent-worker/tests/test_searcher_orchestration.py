@@ -170,6 +170,18 @@ class _Stubs:
             self.web_calls += 1
             return {q: self.web_return.get(q, []) for q in queries}
 
+        # Skip the LLM-driven query rewrite: orchestration tests assert
+        # which tools ran for which raw queries, so refinement (which would
+        # change the query strings) makes the per-source stubs miss. The
+        # rewrite is exercised end-to-end in test_searcher_query_refinement.
+        async def passthrough_refine(_self, _problem, raw):  # noqa: ANN001
+            return raw
+
+        monkeypatch.setattr(
+            "agent_worker.agents.searcher.SearcherAgent._refine_queries",
+            passthrough_refine,
+        )
+
         monkeypatch.setattr(
             "agent_worker.agents.searcher.batch_search_arxiv", fake_arxiv
         )

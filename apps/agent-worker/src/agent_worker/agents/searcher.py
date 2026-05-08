@@ -148,7 +148,17 @@ class SearcherAgent:
 
         # Phase 1: deterministic query derivation. No LLM call — sub_questions
         # and data_requirement names are already distilled signals.
-        queries = self._build_queries(problem, analysis)
+        raw_queries = self._build_queries(problem, analysis)
+
+        # Phase 1b: refine raw queries into bibliographic search strings via
+        # one small LLM call. The Analyzer surfaces sub-questions as modeling
+        # steps ("使用 M/M/c 稳态公式计算 P0、Lq、Wq...") which are awful as
+        # search inputs — every scholarly DB returned 0 actually-relevant
+        # papers on those, and the synthesize step then dropped them all.
+        # The rewriter produces 3 English + (1 Chinese for CJK problems)
+        # queries focused on domain noun phrases. Falls back to the raw set
+        # whenever the call or the JSON parse fails.
+        queries = await self._refine_queries(problem, raw_queries)
         await self.emitter.emit(
             "log",
             # Note: keep the "arXiv queries" prefix — legacy consumers grep
@@ -685,6 +695,77 @@ class SearcherAgent:
                 qs.append(f"{keywords} 数学建模 最优化")
 
         return list(dict.fromkeys(q for q in qs if q))[:5]
+
+    async def _refine_queries(
+        self, problem: ProblemInput, raw_queries: list[str]
+    ) -> list[str]:
+        """LLM-rewrite raw queries into bibliographic search strings.
+
+        Returns up to 6 queries: ~3 English ones (consumed by arXiv /
+        OpenAlex / Crossref) plus ~1 Chinese one when the problem is in
+        CJK (consumed by Baidu / CSDN / Juejin via open-webSearch). Strict
+        fallback: any LLM failure or parse error returns ``raw_queries``
+        unchanged so search never fails on a flaky rewrite.
+        """
+        if not raw_queries:
+            return raw_queries
+        is_cjk = _has_cjk(problem.problem_text)
+        zh_count = 1 if is_cjk else 0
+        en_count = 4 - zh_count
+
+        sys_text = (
+            "You rewrite math-modeling problem fragments into well-formed "
+            "bibliographic search queries for scholarly databases (arXiv, "
+            "OpenAlex, Crossref) and Chinese web search engines.\n"
+            "Strict rules:\n"
+            "- Drop pure formula notation, parameter definitions, and "
+            "step-by-step descriptions. They never retrieve relevant papers.\n"
+            "- Keep domain noun phrases and canonical method names "
+            "(e.g. 'M/M/c queue', 'Erlang C', '排队论 银行 网点').\n"
+            "- Each query is 3 to 10 tokens, focused on the academic topic.\n"
+            "- Output JSON only, no commentary."
+        )
+        user_text = (
+            f"Problem (truncated to 300 chars):\n{problem.problem_text[:300]}\n\n"
+            "Raw analyzer-driven queries (likely poorly shaped):\n"
+            + "\n".join(f"- {q}" for q in raw_queries)
+            + f"\n\nProduce exactly {en_count} English bibliographic queries "
+            f"and {zh_count} Chinese ones, in priority order.\n"
+            'Respond with ONLY this JSON shape: {"queries": ["...", "..."]}'
+        )
+        model = self._model_override or self.prompt.model_preference[0]
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": sys_text},
+            {"role": "user", "content": user_text},
+        ]
+        try:
+            text = await self._stream_and_collect(model, messages)
+            data = orjson.loads(text)
+            refined = data.get("queries") if isinstance(data, dict) else None
+            if not isinstance(refined, list):
+                raise ValueError("missing 'queries' array in LLM response")
+            cleaned = [
+                q.strip() for q in refined if isinstance(q, str) and q.strip()
+            ]
+            if not cleaned:
+                raise ValueError("LLM returned no usable queries")
+            # Dedupe, cap. We deliberately do NOT mix raw + refined: if the
+            # rewriter succeeded, its queries are uniformly better; if it
+            # failed, we already fell into the except branch.
+            return list(dict.fromkeys(cleaned))[:6]
+        except Exception as e:  # noqa: BLE001 — never fail Searcher on rewrite
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "warning",
+                    "message": (
+                        f"query refinement failed: {e}; "
+                        f"using raw queries verbatim"
+                    ),
+                },
+                agent=self.AGENT_NAME,
+            )
+            return raw_queries
 
     async def _synthesize(
         self,

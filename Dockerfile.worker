@@ -33,6 +33,17 @@ RUN set -eux; \
 # uv — pinned.
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 
+# Node 20.x via NodeSource — ~150MB on top of the existing layer.
+# Required so the Searcher can launch the open-webSearch MCP over stdio;
+# without it Bing/Baidu/CSDN/Juejin/DuckDuckGo silently return zero hits.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && node --version && npm --version
+
+# open-webSearch MCP — keeps Baidu/CSDN/Juejin reachable from the worker.
+RUN npm install -g open-websearch
+
 RUN useradd --system --uid 1000 --create-home --home-dir /app --shell /bin/bash app \
  && mkdir -p /app /data/runs \
  && chown -R app:app /app /data
@@ -47,7 +58,8 @@ USER app
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH \
     RUNS_DIR=/data/runs \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    OPEN_WEBSEARCH_CMD=open-websearch
 
 # Resolve from the workspace root so mm-contracts (workspace dep) is found.
 RUN uv sync --frozen --package agent-worker

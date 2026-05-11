@@ -447,6 +447,11 @@ class SearchFindings(BaseModel):
     key_findings: list[str] = Field(default_factory=list, max_length=10)
     # short synthesized bullets for Writer
     datasets_mentioned: list[str] = Field(default_factory=list, max_length=10)
+    # NEW: relative paths under runs/<run_id>/ pointing at extracted full-text
+    # markdown for the top 3 cited papers. Empty when enrichment did not run
+    # or every paper's PDF was unreachable / parse failed. The Writer reads
+    # these to ground specific citations; failure to load is non-fatal.
+    paper_fulltext_paths: list[str] = Field(default_factory=list, max_length=3)
 
 
 class RunResult(BaseModel):

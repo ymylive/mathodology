@@ -375,7 +375,7 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 coder_out=coder_out,
             )
 
-            writer = WriterAgent(gateway, emitter, **kwargs)
+            writer = WriterAgent(gateway, emitter, run_dir=run_dir, **kwargs)
             paper = await writer.run_for(
                 problem, analysis, spec, coder_out, findings
             )

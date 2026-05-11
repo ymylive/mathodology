@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -17,6 +18,7 @@ from mm_contracts import (
     PaperDraft,
     PaperSection,
     ProblemInput,
+    SearchFindings,
 )
 
 
@@ -121,6 +123,128 @@ async def test_writer_agent_returns_validated_paper(
     assert "stage.start" in kinds
     assert "agent.output" in kinds
     assert "stage.done" in kinds
+
+
+async def test_writer_includes_paper_fulltexts_when_paths_present(
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
+    coder_output: CoderOutput,
+) -> None:
+    run_dir = tmp_path / "run"
+    papers_dir = run_dir / "papers"
+    papers_dir.mkdir(parents=True)
+    (papers_dir / "01.md").write_text("paper 1 full text", encoding="utf-8")
+    (papers_dir / "02.md").write_text("paper 2 full text", encoding="utf-8")
+
+    captured_messages: list[dict] = []
+
+    class _CapturingGateway:
+        async def stream_completion(self, **kwargs: object) -> AsyncIterator[str]:
+            msgs = kwargs.get("messages") or []
+            assert isinstance(msgs, list)
+            captured_messages.extend(msgs)  # type: ignore[arg-type]
+            yield (
+                '{"title":"T","abstract":"a",'
+                '"sections":[{"title":"Intro","body_markdown":"x"}],'
+                '"references":[],"figure_refs":[]}'
+            )
+
+        async def close(self) -> None:
+            pass
+
+    emitter = _FakeEmitter()
+    findings = SearchFindings(
+        queries=["q"],
+        papers=[],
+        key_findings=[],
+        datasets_mentioned=[],
+        paper_fulltext_paths=["papers/01.md", "papers/02.md"],
+    )
+
+    agent = WriterAgent(_CapturingGateway(), emitter, run_dir=run_dir)  # type: ignore[arg-type]
+    await agent.run_for(problem, analysis, spec, coder_output, findings)
+
+    body = "\n".join(str(m.get("content", "")) for m in captured_messages)
+    assert "paper 1 full text" in body
+    assert "paper 2 full text" in body
+    # Numbered cite hint surfaces in the user prompt.
+    assert "Paper 1" in body
+    assert "Paper 2" in body
+
+
+async def test_writer_omits_fulltexts_when_no_paths(
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
+    coder_output: CoderOutput,
+) -> None:
+    """Empty `paper_fulltext_paths` → no Paper N block + no errors."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    paper_json = (
+        '{"title":"T","abstract":"a",'
+        '"sections":[{"title":"Intro","body_markdown":"x"}],'
+        '"references":[],"figure_refs":[]}'
+    )
+    gateway = _FakeGateway([paper_json])
+    emitter = _FakeEmitter()
+    findings = SearchFindings(queries=[], papers=[], key_findings=[])
+
+    agent = WriterAgent(gateway, emitter, run_dir=run_dir)  # type: ignore[arg-type]
+    paper = await agent.run_for(problem, analysis, spec, coder_output, findings)
+    assert isinstance(paper, PaperDraft)
+
+
+async def test_writer_truncates_oversized_fulltext(
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
+    coder_output: CoderOutput,
+) -> None:
+    """Oversized paper file is truncated at paragraph boundary."""
+    from agent_worker.agents.writer import WRITER_SOFT_TRUNCATE_CHARS
+
+    run_dir = tmp_path / "run"
+    papers_dir = run_dir / "papers"
+    papers_dir.mkdir(parents=True)
+    # Build a file well over the soft cap, with regular paragraph
+    # boundaries so the rsplit("\n\n", 1) lands on one.
+    paragraph = ("x" * 100 + "\n\n") * (WRITER_SOFT_TRUNCATE_CHARS // 102 + 50)
+    (papers_dir / "01.md").write_text(paragraph, encoding="utf-8")
+
+    captured_messages: list[dict] = []
+
+    class _CapturingGateway:
+        async def stream_completion(self, **kwargs: object) -> AsyncIterator[str]:
+            msgs = kwargs.get("messages") or []
+            assert isinstance(msgs, list)
+            captured_messages.extend(msgs)  # type: ignore[arg-type]
+            yield (
+                '{"title":"T","abstract":"a",'
+                '"sections":[{"title":"Intro","body_markdown":"x"}],'
+                '"references":[],"figure_refs":[]}'
+            )
+
+        async def close(self) -> None:
+            pass
+
+    emitter = _FakeEmitter()
+    findings = SearchFindings(
+        queries=["q"],
+        papers=[],
+        key_findings=[],
+        paper_fulltext_paths=["papers/01.md"],
+    )
+
+    agent = WriterAgent(_CapturingGateway(), emitter, run_dir=run_dir)  # type: ignore[arg-type]
+    await agent.run_for(problem, analysis, spec, coder_output, findings)
+
+    body = "\n".join(str(m.get("content", "")) for m in captured_messages)
+    assert "[...truncated]" in body
 
 
 def test_render_paper_markdown_has_title_and_abstract() -> None:

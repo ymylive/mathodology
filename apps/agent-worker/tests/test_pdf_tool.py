@@ -252,3 +252,65 @@ async def test_batch_enrich_papers_returns_empty_when_all_fail(
 async def test_batch_enrich_papers_empty_list_input() -> None:
     paths = await batch_enrich_papers([], runs_papers_dir=Path("/nonexistent"))
     assert paths == []
+
+
+async def test_find_pdf_url_extracts_doi_from_url_when_doi_field_missing(
+    httpx_mock,  # type: ignore[no-untyped-def]
+) -> None:
+    """LLM-synthesized SearchFindings often puts DOI in url but leaves doi=null.
+    find_pdf_url must still resolve via Unpaywall in that case."""
+    paper = Paper(
+        title="Bank Queueing Study",
+        authors=["X. Smith"],
+        abstract="abs",
+        url="https://doi.org/10.1287/msom.5.2.79.16071",
+        # NB: no doi= and no arxiv_id=  — both null
+    )
+    httpx_mock.add_response(
+        json={
+            "best_oa_location": {
+                "url_for_pdf": "https://example.org/oa.pdf",
+            }
+        }
+    )
+    url = await find_pdf_url(paper, mailto="bot@example.com")
+    assert url == "https://example.org/oa.pdf"
+
+    req = httpx_mock.get_request()
+    assert "10.1287/msom.5.2.79.16071" in str(req.url)
+
+
+async def test_find_pdf_url_extracts_doi_from_http_url_prefix(httpx_mock) -> None:  # type: ignore[no-untyped-def]
+    """Same fallback works for plain http:// doi.org URLs too (rare but valid)."""
+    paper = Paper(
+        title="Old Paper", authors=[], abstract="",
+        url="http://doi.org/10.1234/legacy",
+    )
+    httpx_mock.add_response(json={"best_oa_location": {"url_for_pdf": "https://x/o.pdf"}})
+    url = await find_pdf_url(paper, mailto="bot@example.com")
+    assert url == "https://x/o.pdf"
+
+
+async def test_find_pdf_url_ignores_non_doi_urls() -> None:
+    """A url that's not a doi.org URL doesn't trigger Unpaywall (no mock needed)."""
+    paper = Paper(
+        title="Blog Post", authors=[], abstract="",
+        url="https://blog.example/some-post",
+    )
+    url = await find_pdf_url(paper, mailto="bot@example.com")
+    assert url is None
+
+
+async def test_find_pdf_url_prefers_paper_doi_field_over_url(httpx_mock) -> None:  # type: ignore[no-untyped-def]
+    """When both doi field and url are set, doi field wins (deterministic)."""
+    paper = Paper(
+        title="Both", authors=[], abstract="",
+        url="https://doi.org/10.URL/wrong",
+        doi="10.FIELD/right",
+    )
+    httpx_mock.add_response(json={"best_oa_location": {"url_for_pdf": "https://x.pdf"}})
+    url = await find_pdf_url(paper, mailto="bot@example.com")
+    assert url == "https://x.pdf"
+    req = httpx_mock.get_request()
+    assert "10.FIELD/right" in str(req.url)
+    assert "10.URL/wrong" not in str(req.url)

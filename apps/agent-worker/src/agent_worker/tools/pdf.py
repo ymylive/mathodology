@@ -45,7 +45,20 @@ async def find_pdf_url(
     """
     if paper.arxiv_id:
         return ARXIV_PDF_TEMPLATE.format(arxiv_id=paper.arxiv_id)
-    if not paper.doi:
+
+    # LLM-synthesized SearchFindings often carry the DOI inside `url`
+    # (e.g. "https://doi.org/10.1287/...") while leaving `doi` itself null.
+    # Pull the DOI back out so Unpaywall lookup can still find an OA copy.
+    doi = paper.doi
+    if not doi and paper.url:
+        candidate = paper.url.strip()
+        lowered = candidate.lower()
+        for prefix in ("https://doi.org/", "http://doi.org/"):
+            if lowered.startswith(prefix):
+                doi = candidate[len(prefix):]
+                break
+
+    if not doi:
         return None
 
     # Unpaywall recommends including a mailto for the polite pool. Without
@@ -53,7 +66,7 @@ async def find_pdf_url(
     params: dict[str, str] = {}
     if mailto:
         params["email"] = mailto
-    url = UNPAYWALL_API_URL.format(doi=paper.doi)
+    url = UNPAYWALL_API_URL.format(doi=doi)
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

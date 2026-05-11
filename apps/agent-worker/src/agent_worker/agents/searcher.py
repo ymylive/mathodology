@@ -50,6 +50,7 @@ from agent_worker.prompts import load_prompt
 from agent_worker.tools.arxiv import batch_search_arxiv
 from agent_worker.tools.crossref import batch_search_crossref
 from agent_worker.tools.openalex import batch_search_openalex
+from agent_worker.tools.pdf import batch_enrich_papers
 from agent_worker.tools.tavily import TavilyResult, batch_search_tavily
 from agent_worker.tools.web_search_mcp import WebResult, batch_search_web
 
@@ -163,6 +164,7 @@ class SearcherAgent:
         run_effort: ReasoningEffort = "medium",
         long_context: bool = False,
         model_override: str | None = None,
+        runs_dir: Path | None = None,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
@@ -170,6 +172,7 @@ class SearcherAgent:
         self._run_effort: ReasoningEffort = run_effort
         self._long_context: bool = long_context
         self._model_override: str | None = model_override
+        self._runs_dir: Path | None = runs_dir
 
     async def run_for(
         self, problem: ProblemInput, analysis: AnalyzerOutput
@@ -566,6 +569,32 @@ class SearcherAgent:
             findings = SearchFindings(queries=queries)
         else:
             findings = await self._synthesize(problem, analysis, queries, unique)
+
+        # Phase 3.5/3.6: enrich top papers with full text + compact oversized files.
+        # Skip when runs_dir wasn't injected (test fixtures) or there are no
+        # papers to enrich.
+        if findings.papers and self._runs_dir is not None:
+            runs_papers_dir = (
+                self._runs_dir / str(self.emitter.run_id) / "papers"
+            )
+            paths = await batch_enrich_papers(
+                findings.papers,
+                runs_papers_dir=runs_papers_dir,
+                top_n=3,
+                mailto=settings.polite_mailto or None,
+            )
+            paths = await self._compact_oversized_papers(runs_papers_dir, paths)
+            findings = findings.model_copy(update={"paper_fulltext_paths": paths})
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "info",
+                    "message": (
+                        f"enriched {len(paths)} of top 3 papers with full text"
+                    ),
+                },
+                agent=self.AGENT_NAME,
+            )
 
         duration_ms = int((time.monotonic() - t0) * 1000)
         await self.emitter.emit(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -359,3 +360,105 @@ async def test_searcher_revise_with_critique_returns_validated_findings(
     )
 
     assert revised.key_findings == ["Sparse search results; use as context only."]
+
+
+async def test_searcher_populates_paper_fulltext_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    tmp_path: Path,
+) -> None:
+    """When runs_dir is provided and enrichment succeeds, paths land on SearchFindings."""
+    papers = _sample_papers()
+
+    async def fake_batch(queries, max_per_query=5, concurrency=2):  # noqa: ANN001
+        return {q: papers for q in queries[:1]} | {q: [] for q in queries[1:]}
+
+    async def fake_empty(queries, **_):  # noqa: ANN001, ANN003
+        return {q: [] for q in queries}
+
+    async def fake_enrich(papers_arg, runs_papers_dir, top_n=3, **_):  # noqa: ANN001, ANN003
+        # Confirm the Searcher chose the right cap.
+        assert top_n == 3
+        runs_papers_dir.mkdir(parents=True, exist_ok=True)
+        (runs_papers_dir / "01.md").write_text("body 1", encoding="utf-8")
+        return ["papers/01.md"]
+
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_arxiv", fake_batch
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_openalex", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_crossref", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_web", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_enrich_papers", fake_enrich
+    )
+
+    gateway = _FakeGateway([_FINDINGS_JSON])
+    emitter = _FakeEmitter()
+
+    agent = SearcherAgent(gateway, emitter, runs_dir=tmp_path)  # type: ignore[arg-type]
+    out = await agent.run_for(problem, analysis)
+
+    assert out.paper_fulltext_paths == ["papers/01.md"]
+    paper_file = tmp_path / str(emitter.run_id) / "papers" / "01.md"
+    assert paper_file.exists()
+
+
+async def test_searcher_skips_enrichment_when_no_papers(
+    monkeypatch: pytest.MonkeyPatch,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    tmp_path: Path,
+) -> None:
+    """No papers → no enrichment call → empty paper_fulltext_paths."""
+    async def fake_batch_empty(queries, max_per_query=5, concurrency=2):  # noqa: ANN001
+        return {q: [] for q in queries}
+
+    async def fake_empty(queries, **_):  # noqa: ANN001, ANN003
+        return {q: [] for q in queries}
+
+    enrich_called = False
+
+    async def fake_enrich(*_a, **_kw):  # noqa: ANN001, ANN003
+        nonlocal enrich_called
+        enrich_called = True
+        return []
+
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_arxiv", fake_batch_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_openalex", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_crossref", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_search_web", fake_empty
+    )
+    monkeypatch.setattr(
+        "agent_worker.agents.searcher.batch_enrich_papers", fake_enrich
+    )
+
+    class _NoopGateway:
+        async def stream_completion(self, **_: object) -> AsyncIterator[str]:
+            raise AssertionError("LLM must not be called")
+            yield ""
+
+        async def close(self) -> None:
+            pass
+
+    emitter = _FakeEmitter()
+    agent = SearcherAgent(_NoopGateway(), emitter, runs_dir=tmp_path)  # type: ignore[arg-type]
+    out = await agent.run_for(problem, analysis)
+
+    assert out.papers == []
+    assert out.paper_fulltext_paths == []
+    assert enrich_called is False

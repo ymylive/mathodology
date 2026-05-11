@@ -328,7 +328,7 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             )
             assert isinstance(analysis, AnalyzerOutput)
 
-            searcher = SearcherAgent(gateway, emitter, **kwargs)
+            searcher = SearcherAgent(gateway, emitter, runs_dir=runs_dir, **kwargs)
             findings = await searcher.run_for(problem, analysis)
             findings = await _review_and_maybe_revise(
                 critic=critic,

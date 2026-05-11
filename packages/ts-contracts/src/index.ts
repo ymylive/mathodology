@@ -139,19 +139,19 @@ export interface SearchConfig {
 // ground citations and retrieve enriched paper metadata.
 export interface Paper {
   title: string;
-  authors?: string[];
-  abstract?: string;
+  authors: string[];
+  abstract: string;
   url: string;
-  arxiv_id?: string | null;
-  doi?: string | null;
-  published?: string | null;
-  relevance_reason?: string | null;
+  arxiv_id: string | null;
+  doi: string | null;
+  published: string | null;
+  relevance_reason: string | null;
 }
 
 export interface SearchFindings {
-  queries?: string[];
-  papers?: Paper[];
-  key_findings?: string[];
-  datasets_mentioned?: string[];
-  paper_fulltext_paths?: string[];
+  queries: string[];
+  papers: Paper[];
+  key_findings: string[];
+  datasets_mentioned: string[];
+  paper_fulltext_paths: string[];
 }

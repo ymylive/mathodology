@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_worker.tools.pdf import find_pdf_url
+from agent_worker.tools.pdf import fetch_and_extract, find_pdf_url
 from mm_contracts import Paper
 
 
@@ -68,3 +68,95 @@ async def test_find_pdf_url_returns_none_when_unpaywall_5xx(httpx_mock) -> None:
     httpx_mock.add_response(status_code=503)
     url = await find_pdf_url(_doi_paper(), mailto="bot@example.com")
     assert url is None
+
+
+# Minimal valid PDF byte stream that pdfplumber accepts. We do NOT actually
+# parse it — pdfplumber.open is monkey-patched in the test below.
+_FAKE_PDF_BYTES = b"%PDF-1.4\n%fake\n"
+
+
+class _FakePage:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def extract_text(self) -> str:
+        return self._text
+
+
+class _FakePdf:
+    def __init__(self, pages: list[_FakePage]) -> None:
+        self.pages = pages
+
+    def __enter__(self) -> _FakePdf:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+
+async def test_fetch_and_extract_pdf(httpx_mock, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    httpx_mock.add_response(
+        content=_FAKE_PDF_BYTES,
+        headers={"content-type": "application/pdf"},
+    )
+    fake = _FakePdf([_FakePage("Hello, world."), _FakePage("Methods: ...")])
+    monkeypatch.setattr(
+        "agent_worker.tools.pdf.pdfplumber.open", lambda _: fake
+    )
+
+    text, parser = await fetch_and_extract("http://example.com/p.pdf")
+    assert "Hello, world." in text
+    assert "Methods" in text
+    assert parser == "pdfplumber"
+
+
+async def test_fetch_and_extract_html_uses_trafilatura(httpx_mock, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    html = b"<html><body><article>Main content here.</article></body></html>"
+    httpx_mock.add_response(
+        content=html, headers={"content-type": "text/html; charset=utf-8"}
+    )
+    monkeypatch.setattr(
+        "agent_worker.tools.pdf.trafilatura.extract",
+        lambda body, **_: "Main content here.",
+    )
+
+    text, parser = await fetch_and_extract("http://example.com/article")
+    assert text == "Main content here."
+    assert parser == "trafilatura"
+
+
+async def test_fetch_and_extract_rejects_oversized_response(httpx_mock) -> None:  # type: ignore[no-untyped-def]
+    httpx_mock.add_response(
+        content=b"x" * (21 * 1024 * 1024),
+        headers={"content-type": "application/pdf"},
+    )
+    text, parser = await fetch_and_extract(
+        "http://example.com/huge.pdf", max_bytes=20_000_000
+    )
+    assert text is None
+    assert parser == "none"
+
+
+async def test_fetch_and_extract_returns_none_on_timeout(httpx_mock) -> None:  # type: ignore[no-untyped-def]
+    import httpx
+    httpx_mock.add_exception(httpx.ReadTimeout("slow"))
+    text, parser = await fetch_and_extract("http://example.com/slow.pdf")
+    assert text is None
+    assert parser == "none"
+
+
+async def test_fetch_and_extract_returns_none_when_extractor_returns_empty(
+    httpx_mock, monkeypatch  # type: ignore[no-untyped-def]
+) -> None:
+    httpx_mock.add_response(
+        content=_FAKE_PDF_BYTES,
+        headers={"content-type": "application/pdf"},
+    )
+    fake = _FakePdf([_FakePage("")])
+    monkeypatch.setattr(
+        "agent_worker.tools.pdf.pdfplumber.open", lambda _: fake
+    )
+
+    text, parser = await fetch_and_extract("http://example.com/empty.pdf")
+    assert text is None
+    assert parser == "none"

@@ -13,9 +13,13 @@ keeps running and SearchFindings.paper_fulltext_paths just stays empty.
 
 from __future__ import annotations
 
+import io
 import logging
+from typing import Literal
 
 import httpx
+import pdfplumber
+import trafilatura
 from mm_contracts import Paper
 
 _log = logging.getLogger(__name__)
@@ -67,8 +71,67 @@ async def find_pdf_url(
     return pdf_url if isinstance(pdf_url, str) and pdf_url.strip() else None
 
 
+async def fetch_and_extract(
+    url: str,
+    *,
+    timeout: float = 15.0,  # noqa: ASYNC109 — applied to httpx, not an asyncio primitive
+    max_bytes: int = 20_000_000,
+) -> tuple[str | None, Literal["trafilatura", "pdfplumber", "none"]]:
+    """Fetch URL and return (extracted_text, parser_name).
+
+    text=None signals failure for any reason (network, oversize, parse,
+    or empty extraction). The caller never raises — the Searcher's
+    enrichment phase is best-effort. ``max_bytes`` rejects oversized
+    bodies to bound memory.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(url, follow_redirects=True)
+            r.raise_for_status()
+    except Exception as e:  # noqa: BLE001 — best-effort
+        _log.warning("fetch_and_extract: HTTP failure for %s: %s", url, e)
+        return None, "none"
+
+    content = r.content
+    if len(content) > max_bytes:
+        _log.warning(
+            "fetch_and_extract: oversized response %d bytes for %s; rejecting",
+            len(content), url,
+        )
+        return None, "none"
+
+    ctype = (r.headers.get("content-type") or "").lower()
+    if "pdf" in ctype or url.lower().endswith(".pdf"):
+        try:
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                pages_text = [p.extract_text() or "" for p in pdf.pages]
+            text = "\n\n".join(t for t in pages_text if t.strip())
+        except Exception as e:  # noqa: BLE001
+            _log.warning("fetch_and_extract: pdfplumber failed for %s: %s", url, e)
+            return None, "none"
+        return (text, "pdfplumber") if text.strip() else (None, "none")
+
+    # HTML / other text content → trafilatura
+    try:
+        text = trafilatura.extract(
+            content,
+            include_comments=False,
+            include_tables=True,
+            favor_recall=True,
+            url=url,
+        )
+    except Exception as e:  # noqa: BLE001
+        _log.warning("fetch_and_extract: trafilatura failed for %s: %s", url, e)
+        return None, "none"
+
+    if not text or not text.strip():
+        return None, "none"
+    return text, "trafilatura"
+
+
 __all__ = [
     "ARXIV_PDF_TEMPLATE",
     "UNPAYWALL_API_URL",
+    "fetch_and_extract",
     "find_pdf_url",
 ]

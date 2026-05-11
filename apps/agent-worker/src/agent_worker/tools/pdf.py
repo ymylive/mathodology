@@ -13,8 +13,10 @@ keeps running and SearchFindings.paper_fulltext_paths just stays empty.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -129,9 +131,60 @@ async def fetch_and_extract(
     return text, "trafilatura"
 
 
+async def batch_enrich_papers(
+    papers: list[Paper],
+    runs_papers_dir: Path,
+    top_n: int = 3,
+    *,
+    mailto: str | None = None,
+    concurrency: int = 3,
+) -> list[str]:
+    """Enrich the top N papers concurrently and persist successes.
+
+    For each paper in papers[:top_n], in parallel (bounded by ``concurrency``):
+      1. Resolve a PDF/HTML URL via find_pdf_url.
+      2. Fetch + extract via fetch_and_extract.
+      3. On success, write the text to ``runs_papers_dir / f"{idx:02d}.md"``
+         where ``idx`` is the 1-based original position in papers[:top_n].
+
+    Returns a list of relative paths under runs_papers_dir.parent, in
+    original index order, suitable for SearchFindings.paper_fulltext_paths.
+    Failed papers are not represented in the output.
+    """
+    if not papers:
+        return []
+    # Create directory synchronously (I/O is local).
+    runs_papers_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+    sem = asyncio.Semaphore(concurrency)
+
+    async def enrich_one(idx: int, paper: Paper) -> tuple[int, str | None]:
+        async with sem:
+            pdf_url = await find_pdf_url(paper, mailto=mailto)
+            if not pdf_url:
+                return idx, None
+            text, parser = await fetch_and_extract(pdf_url)
+            if not text:
+                _log.warning(
+                    "enrich: extraction empty for paper #%d (%s)", idx, pdf_url
+                )
+                return idx, None
+            rel_path = f"papers/{idx:02d}.md"
+            (runs_papers_dir / f"{idx:02d}.md").write_text(text, encoding="utf-8")
+            _log.info(
+                "enrich: paper #%d via %s (%d chars)", idx, parser, len(text)
+            )
+            return idx, rel_path
+
+    results = await asyncio.gather(
+        *(enrich_one(i, p) for i, p in enumerate(papers[:top_n], start=1))
+    )
+    return [rel for _, rel in sorted(results) if rel is not None]
+
+
 __all__ = [
     "ARXIV_PDF_TEMPLATE",
     "UNPAYWALL_API_URL",
+    "batch_enrich_papers",
     "fetch_and_extract",
     "find_pdf_url",
 ]

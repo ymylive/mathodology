@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from agent_worker.tools.pdf import fetch_and_extract, find_pdf_url
+from pathlib import Path
+
+from agent_worker.tools.pdf import batch_enrich_papers, fetch_and_extract, find_pdf_url
 from mm_contracts import Paper
 
 
@@ -160,3 +162,93 @@ async def test_fetch_and_extract_returns_none_when_extractor_returns_empty(
     text, parser = await fetch_and_extract("http://example.com/empty.pdf")
     assert text is None
     assert parser == "none"
+
+
+async def test_batch_enrich_papers_writes_files_for_arxiv_sources(
+    tmp_path: Path, httpx_mock, monkeypatch
+) -> None:
+    # Three arXiv papers — no Unpaywall calls, direct PDF URLs.
+    papers = [_arxiv_paper(f"2401.{i:05d}") for i in range(1, 4)]
+    # Each pdf fetch returns a parseable PDF byte stream.
+    for _ in papers:
+        httpx_mock.add_response(
+            content=b"%PDF-1.4\n",
+            headers={"content-type": "application/pdf"},
+        )
+    monkeypatch.setattr(
+        "agent_worker.tools.pdf.pdfplumber.open",
+        lambda _: _FakePdf([_FakePage("paper body")]),
+    )
+
+    runs_papers_dir = tmp_path / "papers"
+    paths = await batch_enrich_papers(
+        papers, runs_papers_dir=runs_papers_dir, top_n=3
+    )
+    assert paths == ["papers/01.md", "papers/02.md", "papers/03.md"]
+    for rel in paths:
+        assert (tmp_path / rel).read_text("utf-8") == "paper body"
+
+
+async def test_batch_enrich_papers_caps_at_top_n(
+    tmp_path: Path, httpx_mock, monkeypatch
+) -> None:
+    """Given 5 papers and top_n=3, only the first 3 are processed."""
+    papers = [_arxiv_paper(f"2401.{i:05d}") for i in range(1, 6)]
+    for _ in range(3):
+        httpx_mock.add_response(
+            content=b"%PDF-1.4\n",
+            headers={"content-type": "application/pdf"},
+        )
+    monkeypatch.setattr(
+        "agent_worker.tools.pdf.pdfplumber.open",
+        lambda _: _FakePdf([_FakePage("body")]),
+    )
+
+    paths = await batch_enrich_papers(
+        papers, runs_papers_dir=tmp_path / "papers", top_n=3
+    )
+    assert len(paths) == 3
+
+
+async def test_batch_enrich_papers_skips_failed_papers(
+    tmp_path: Path, httpx_mock, monkeypatch
+) -> None:
+    """Paper 2 fails; results contain only 01 and 03 with correct numbering."""
+    papers = [_arxiv_paper(f"2401.{i:05d}") for i in range(1, 4)]
+    # Paper 1: success
+    httpx_mock.add_response(
+        content=b"%PDF-1.4\n", headers={"content-type": "application/pdf"}
+    )
+    # Paper 2: HTTP failure
+    httpx_mock.add_response(status_code=503)
+    # Paper 3: success
+    httpx_mock.add_response(
+        content=b"%PDF-1.4\n", headers={"content-type": "application/pdf"}
+    )
+    monkeypatch.setattr(
+        "agent_worker.tools.pdf.pdfplumber.open",
+        lambda _: _FakePdf([_FakePage("body")]),
+    )
+
+    paths = await batch_enrich_papers(
+        papers, runs_papers_dir=tmp_path / "papers", top_n=3, concurrency=1
+    )
+    # Numbering matches original index (01, 03) — 02 dropped.
+    assert paths == ["papers/01.md", "papers/03.md"]
+
+
+async def test_batch_enrich_papers_returns_empty_when_all_fail(
+    tmp_path: Path, httpx_mock
+) -> None:
+    papers = [_arxiv_paper(f"2401.{i:05d}") for i in range(1, 4)]
+    for _ in range(3):
+        httpx_mock.add_response(status_code=503)
+    paths = await batch_enrich_papers(
+        papers, runs_papers_dir=tmp_path / "papers", top_n=3
+    )
+    assert paths == []
+
+
+async def test_batch_enrich_papers_empty_list_input() -> None:
+    paths = await batch_enrich_papers([], runs_papers_dir=Path("/nonexistent"))
+    assert paths == []

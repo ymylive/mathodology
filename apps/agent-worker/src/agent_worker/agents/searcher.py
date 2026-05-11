@@ -26,6 +26,7 @@ import asyncio
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -113,6 +114,39 @@ def _normalize_url(url: str) -> str:
     )
 
 _log = logging.getLogger(__name__)
+
+
+# --- PDF enrichment / compaction tuning -------------------------------------
+COMPACT_THRESHOLD_CHARS = 24_000
+COMPACT_TARGET_CHARS = 24_000
+COMPACT_MIN_OUTPUT_CHARS = 1_000
+
+_COMPACT_SYSTEM_PROMPT = """You compress an academic paper into a high-density summary for downstream LLM citation. Preserve verbatim:
+- Mathematical formulas (LaTeX or plain)
+- Parameter definitions and units
+- Methodology steps in order
+- Experimental setup (sample size, data source, conditions)
+- Numerical results with confidence intervals or error bars
+- Key claims that Writer might cite
+
+Drop entirely:
+- Boilerplate (acknowledgments, ethics, conflicts of interest)
+- Related-work prose (the Writer has SearchFindings.papers for that)
+- Narrative filler ("In this paper we propose...")
+- Reference list
+- Repeated information
+
+Preserve the source language. If the input is Chinese, output Chinese.
+If English, output English. Do not translate.
+
+Output: dense markdown, ≤24000 characters. Keep section headings
+(## Methods, ## Results, etc.) so Writer can grep for them.
+Respond with the compacted markdown only."""
+
+# Sentinel for _stream_and_collect's default. Passing response_format=None
+# explicitly disables the JSON-object constraint (used by _compact_one); the
+# default preserves backward compat for _ask_llm / _refine_queries.
+_DEFAULT_JSON_RESPONSE_FORMAT: dict[str, Any] = {"type": "json_object"}
 
 
 class SearcherAgent:
@@ -767,6 +801,89 @@ class SearcherAgent:
             )
             return raw_queries
 
+    async def _compact_oversized_papers(
+        self, runs_papers_dir: Path, paths: list[str]
+    ) -> list[str]:
+        """Compact any persisted paper text exceeding COMPACT_THRESHOLD_CHARS.
+
+        Overwrites in place. Compaction failure leaves the raw file untouched —
+        the Writer side has its own char-budget soft truncation as a safety
+        net. Returns the same paths argument unchanged (compaction never drops
+        a paper; it either improves the file or leaves it alone).
+        """
+        run_dir = runs_papers_dir.parent
+        for rel_path in paths:
+            abs_path = run_dir / rel_path
+            try:
+                raw = abs_path.read_text("utf-8")
+            except OSError as e:
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "warning",
+                        "message": f"compact: could not read {rel_path}: {e}",
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                continue
+            if len(raw) <= COMPACT_THRESHOLD_CHARS:
+                continue
+            compacted = await self._compact_one(raw)
+            if not compacted or len(compacted) < COMPACT_MIN_OUTPUT_CHARS:
+                await self.emitter.emit(
+                    "log",
+                    {
+                        "level": "warning",
+                        "message": (
+                            f"compact: keeping raw for {rel_path} "
+                            f"(compaction unusable)"
+                        ),
+                    },
+                    agent=self.AGENT_NAME,
+                )
+                continue
+            abs_path.write_text(compacted, encoding="utf-8")
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "info",
+                    "message": (
+                        f"compact: {rel_path} {len(raw)} → {len(compacted)} chars"
+                    ),
+                },
+                agent=self.AGENT_NAME,
+            )
+        return paths
+
+    async def _compact_one(self, raw_text: str) -> str | None:
+        """Run one LLM call to compress raw paper text. None on failure."""
+        model = self._model_override or self.prompt.model_preference[0]
+        user_text = (
+            "Compact this paper text into ≤24000 characters of dense markdown, "
+            "preserving the source language verbatim.\n\nRaw paper text:\n\n"
+            + raw_text
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": _COMPACT_SYSTEM_PROMPT},
+            {"role": "user", "content": user_text},
+        ]
+        try:
+            text = await self._stream_and_collect(
+                model, messages, response_format=None
+            )
+        except Exception as e:  # noqa: BLE001
+            await self.emitter.emit(
+                "log",
+                {
+                    "level": "warning",
+                    "message": f"compact: LLM call failed: {e}",
+                },
+                agent=self.AGENT_NAME,
+            )
+            return None
+        text = text.strip() if isinstance(text, str) else ""
+        return text or None
+
     async def _synthesize(
         self,
         problem: ProblemInput,
@@ -879,8 +996,19 @@ class SearcherAgent:
         ) from last_err
 
     async def _stream_and_collect(
-        self, model: str, messages: list[dict[str, Any]]
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        *,
+        response_format: dict[str, Any] | None = _DEFAULT_JSON_RESPONSE_FORMAT,
     ) -> str:
+        """Stream completion; concat deltas; return raw text.
+
+        ``response_format`` defaults to ``{"type": "json_object"}`` to preserve
+        the existing JSON-only behavior used by ``_ask_llm`` /
+        ``_refine_queries``. Pass ``response_format=None`` for free-form text
+        responses (e.g. the compaction LLM call, which returns markdown).
+        """
         effort = self.prompt.reasoning_effort or self._run_effort
         parts: list[str] = []
         async for delta in self.gateway.stream_completion(
@@ -891,7 +1019,7 @@ class SearcherAgent:
             temperature=self.prompt.temperature,
             # 20k default, 1M when long-context opt-in is set. See base.py.
             max_tokens=1_000_000 if self._long_context else 20000,
-            response_format={"type": "json_object"},
+            response_format=response_format,
             reasoning_effort=effort,
         ):
             parts.append(delta)

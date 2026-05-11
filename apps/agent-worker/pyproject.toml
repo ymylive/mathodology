@@ -23,6 +23,8 @@ dependencies = [
   "fastembed>=0.4",
   "defusedxml>=0.7",
   "mcp>=1.27.0",
+  "trafilatura>=1.12",
+  "pdfplumber>=0.11",
 ]
 
 [dependency-groups]

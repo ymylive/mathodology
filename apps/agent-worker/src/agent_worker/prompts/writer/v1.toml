@@ -87,6 +87,16 @@ Coder executed cells (JSON array; each has source, stdout[:500], result):
 Searcher findings (JSON; may be empty):
 {{ findings_json }}
 
+## Supplementary full text for citation grounding
+
+The following are the full text (or compacted summaries) of the top
+papers retrieved by the Searcher. Use them to ground specific
+citations — refer to equations, methodology details, and numerical
+results verbatim where appropriate. When this block is empty, fall
+back to title+abstract citation from the Sources list.
+
+{{ paper_fulltexts }}
+
 Respond with a JSON object. Required top-level keys:
   title (string),
   abstract (string; English ≤ 800 words or Chinese ≤ 1000 字; MUST contain ≥ 2 concrete numerical results),

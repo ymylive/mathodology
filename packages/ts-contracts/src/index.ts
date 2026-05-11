@@ -132,3 +132,26 @@ export interface SearchConfig {
   tavily_depth: "basic" | "advanced";
   fallback_threshold: number;
 }
+
+// Hand-written Searcher agent output contract. Mirrors
+// `packages/py-contracts/src/mm_contracts/agent_io.py::Paper` and
+// `SearchFindings`. Consumed by downstream agents (Writer, etc.) to
+// ground citations and retrieve enriched paper metadata.
+export interface Paper {
+  title: string;
+  authors: string[];
+  abstract: string;
+  url: string;
+  arxiv_id: string | null;
+  doi: string | null;
+  published: string | null;
+  relevance_reason: string | null;
+}
+
+export interface SearchFindings {
+  queries: string[];
+  papers: Paper[];
+  key_findings: string[];
+  datasets_mentioned: string[];
+  paper_fulltext_paths: string[];
+}

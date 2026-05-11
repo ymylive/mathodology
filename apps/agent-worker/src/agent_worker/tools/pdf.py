@@ -55,7 +55,7 @@ async def find_pdf_url(
             r.raise_for_status()
             data = r.json()
     except Exception as e:  # noqa: BLE001 — best-effort
-        _log.info("Unpaywall lookup failed for %s: %s", paper.doi, e)
+        _log.warning("Unpaywall lookup failed for %s: %s", paper.doi, e)
         return None
 
     if not isinstance(data, dict):

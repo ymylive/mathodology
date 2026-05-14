@@ -9,6 +9,12 @@ use crate::error::AppError;
 pub const JOBS_STREAM: &str = "mm:jobs";
 pub const JOBS_MAXLEN: usize = 10_000;
 
+/// Separate stream for natural-language paper fine-tune requests. We keep
+/// these off `mm:jobs` so worker concurrency budgets and ack semantics
+/// don't interfere with full-pipeline runs.
+pub const FINETUNE_STREAM: &str = "mm:finetune";
+pub const FINETUNE_MAXLEN: usize = 5_000;
+
 pub fn events_stream_key(run_id: &Uuid) -> String {
     format!("mm:events:{run_id}")
 }
@@ -39,6 +45,33 @@ pub async fn enqueue_job(
         )
         .await?;
 
+    Ok(id)
+}
+
+/// XADD mm:finetune. Fields: run_id, session_id, message, created_at.
+pub async fn enqueue_finetune_job(
+    redis: &mut ConnectionManager,
+    run_id: &Uuid,
+    session_id: &Uuid,
+    message: &str,
+) -> Result<String, AppError> {
+    let created_at = Utc::now().to_rfc3339();
+    let run_id_str = run_id.to_string();
+    let session_id_str = session_id.to_string();
+    let fields: &[(&str, &str)] = &[
+        ("run_id", run_id_str.as_str()),
+        ("session_id", session_id_str.as_str()),
+        ("message", message),
+        ("created_at", created_at.as_str()),
+    ];
+    let id: String = redis
+        .xadd_maxlen(
+            FINETUNE_STREAM,
+            redis::streams::StreamMaxlen::Approx(FINETUNE_MAXLEN),
+            "*",
+            fields,
+        )
+        .await?;
     Ok(id)
 }
 

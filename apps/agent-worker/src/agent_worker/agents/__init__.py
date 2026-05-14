@@ -5,6 +5,7 @@ from agent_worker.agents.base import AgentError, AgentParseError, BaseAgent
 from agent_worker.agents.coder import CoderAgent, CoderDirective
 from agent_worker.agents.critic import CriticAgent
 from agent_worker.agents.modeler import ModelerAgent
+from agent_worker.agents.paper_editor import PaperEditorAgent, PaperEditorDirective
 from agent_worker.agents.searcher import SearcherAgent
 from agent_worker.agents.writer import WriterAgent
 
@@ -17,6 +18,8 @@ __all__ = [
     "CoderDirective",
     "CriticAgent",
     "ModelerAgent",
+    "PaperEditorAgent",
+    "PaperEditorDirective",
     "SearcherAgent",
     "WriterAgent",
 ]

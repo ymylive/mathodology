@@ -22,6 +22,8 @@ import AgentOutputView from "@/components/AgentOutputView.vue";
 import PaperDraft from "@/components/PaperDraft.vue";
 import ExportPanel from "@/components/ExportPanel.vue";
 import SearchConfigPanel from "@/components/SearchConfigPanel.vue";
+import FinetuneChat from "@/components/FinetuneChat.vue";
+import { useFinetuneStore } from "@/stores/finetune";
 import { useSearchConfigStore } from "@/stores/searchConfig";
 import T from "@/components/T.vue";
 
@@ -44,6 +46,7 @@ const router = useRouter();
 const run = useRunStore();
 const settings = useRunSettingsStore();
 const searchConfig = useSearchConfigStore();
+const finetune = useFinetuneStore();
 const i18n = useI18n();
 
 // --- live clock for elapsed counters & stage pill durations -----------------
@@ -85,13 +88,16 @@ watch(
   (next, prev) => {
     if (next === prev) return;
     if (next === null) {
-      // Moved back to the empty-state page — drop the socket.
+      // Moved back to the empty-state page — drop the socket and clear any
+      // lingering finetune conversation from the previous run.
       run.reset();
+      finetune.reset();
       runRecord.value = null;
       return;
     }
     if (run.runId !== next) {
       run.reset();
+      finetune.reset();
       runRecord.value = null;
       run.runId = next;
       run.status = "running";
@@ -104,7 +110,18 @@ watch(
 
 onBeforeUnmount(() => {
   run.reset();
+  finetune.reset();
 });
+
+// Called when the finetune assistant finishes a turn that included an
+// edit-style tool. We refresh the run record so paths (paper_path,
+// notebook_path) reflect the new artifacts, and the existing event stream
+// will carry any re-emitted writer output if the worker chose to do that.
+async function onPaperUpdated(): Promise<void> {
+  const id = routeRunId.value;
+  if (!id) return;
+  await loadRunRecord(id);
+}
 
 // --- start a new run from the empty-state form ------------------------------
 async function onStart(payload: { problemText: string }) {
@@ -431,6 +448,14 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
           v-if="paperDraft"
           :output="paperDraft"
           :run-id="routeRunId!"
+        />
+
+        <!-- Fine-tune chat — natural-language edits delegated to the
+             worker via POST /runs/:id/finetune. Runs on the same WS as
+             the pipeline; events are demultiplexed by `kind` prefix. -->
+        <FinetuneChat
+          :run-id="routeRunId!"
+          @paper-updated="onPaperUpdated"
         />
 
         <!-- Consolidated export panel: template picker + PDF / DOCX / TeX /

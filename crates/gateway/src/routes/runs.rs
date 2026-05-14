@@ -8,7 +8,7 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::audit::spawn_audit_task;
-use crate::dispatch::enqueue_job;
+use crate::dispatch::{enqueue_finetune_job, enqueue_job};
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -117,6 +117,65 @@ pub async fn create_run(
         StatusCode::CREATED,
         Json(RunCreated {
             run_id,
+            status: "queued",
+        }),
+    ))
+}
+
+/// Body for `POST /runs/:run_id/finetune` — a single NL instruction.
+#[derive(Debug, Deserialize)]
+pub struct FinetuneRequest {
+    pub message: String,
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FinetuneAccepted {
+    pub run_id: Uuid,
+    pub session_id: Uuid,
+    pub status: &'static str,
+}
+
+/// `POST /runs/:run_id/finetune` — enqueue a paper fine-tune request.
+///
+/// The worker picks up the job, loads the run's paper.md + notebook.ipynb,
+/// and runs PaperEditorAgent against the natural-language `message`. Events
+/// stream back on the same `mm:events:<run_id>` channel tagged with
+/// `kind: "finetune.*"`. The frontend filters by prefix.
+///
+/// Returns 202 + `{run_id, session_id, status: "queued"}`. session_id is
+/// either taken from the request (for resuming a thread) or freshly minted.
+#[tracing::instrument(skip_all, fields(%run_id))]
+pub async fn finetune_run(
+    State(mut state): State<AppState>,
+    Path(run_id): Path<Uuid>,
+    Json(req): Json<FinetuneRequest>,
+) -> Result<(StatusCode, Json<FinetuneAccepted>), AppError> {
+    if req.message.trim().is_empty() {
+        return Err(AppError::BadRequest("message must be non-empty".to_string()));
+    }
+    // Verify the run exists. We don't require status='success' — users may
+    // want to fine-tune a paper from a partially-failed run too.
+    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_optional(&state.pg)
+        .await
+        .map_err(|e| AppError::Internal(format!("lookup run: {e}")))?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let session_id = req.session_id.unwrap_or_else(Uuid::new_v4);
+    let stream_id =
+        enqueue_finetune_job(&mut state.redis, &run_id, &session_id, &req.message).await?;
+    tracing::info!(%run_id, %session_id, stream_id, "finetune job enqueued");
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(FinetuneAccepted {
+            run_id,
+            session_id,
             status: "queued",
         }),
     ))

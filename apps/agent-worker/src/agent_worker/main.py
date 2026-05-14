@@ -16,6 +16,12 @@ from redis.exceptions import ResponseError
 
 from agent_worker.config import Settings, get_settings
 from agent_worker.events import EventEmitter
+from agent_worker.finetune_main import (
+    _consumer_name as _finetune_consumer_name,
+)
+from agent_worker.finetune_main import (
+    consume_loop as _finetune_consume_loop,
+)
 from agent_worker.logging import configure_logging, get_logger
 from agent_worker.pipeline import run_pipeline
 
@@ -173,15 +179,34 @@ async def run(settings: Settings | None = None) -> None:
         _consume_loop(redis, consumer, stop, semaphore, in_flight)
     )
 
-    await stop.wait()
-    log.info("worker_draining", in_flight=len(in_flight))
+    # Parallel consumer for paper fine-tune jobs (mm:finetune). Separate
+    # stream/group so it doesn't compete with full-pipeline concurrency.
+    finetune_semaphore = asyncio.Semaphore(max(1, cfg.worker_concurrency))
+    finetune_in_flight: set[asyncio.Task[None]] = set()
+    finetune_consumer = _finetune_consumer_name()
+    finetune_task = asyncio.create_task(
+        _finetune_consume_loop(
+            redis, cfg, finetune_consumer, stop, finetune_semaphore, finetune_in_flight
+        )
+    )
 
-    consumer_task.cancel()
+    await stop.wait()
+    log.info(
+        "worker_draining",
+        in_flight=len(in_flight),
+        finetune_in_flight=len(finetune_in_flight),
+    )
+
+    for task in (consumer_task, finetune_task):
+        task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await consumer_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await finetune_task
 
-    if in_flight:
-        await asyncio.gather(*in_flight, return_exceptions=True)
+    pending = list(in_flight) + list(finetune_in_flight)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
     await redis.aclose()
     log.info("worker_stopped")

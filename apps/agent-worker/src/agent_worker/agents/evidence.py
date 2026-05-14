@@ -50,6 +50,39 @@ _SENS_FIGURE_TOKENS = (
     "灵敏度",
 )
 
+# Lifted out of `mine_sensitivity_evidence` per round-6 audit (Agent A
+# finding #4): these were being rebuilt on every Writer revision round.
+# Module-level constants compile once at import time.
+_GREEK_LOWER = "αβγδεζηθικλμνξορστυφχψω"
+_PARAM_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # "perturbed α by ±10%" / "varying β over ±20%" / "increased X by 10%"
+    re.compile(
+        rf"(?:perturb(?:ed|ing)?|vary(?:ing)?|increas(?:e[ds]?|ing)|decreas(?:e[ds]?|ing)|chang(?:e[ds]?|ing))"
+        rf"\s+([{_GREEK_LOWER}]|[A-Za-z](?:_?[A-Za-z0-9]{{0,8}})?)"
+        rf"\s+(?:by|of|over|at|with)?\s*{_PERTURB_RE.pattern}",
+        re.IGNORECASE,
+    ),
+    # "α by ±10%" / "γ at ±20%" / "X_init by 5%"
+    re.compile(
+        rf"\b([{_GREEK_LOWER}]|[A-Za-z]_[A-Za-z0-9]{{1,8}}|[A-Za-z]{{1,3}})\s+(?:by|at|over)\s*{_PERTURB_RE.pattern}",
+        re.IGNORECASE,
+    ),
+    # "For α at ±10%" / "对 α 增减 10%"
+    re.compile(
+        rf"(?:For|对|参数)\s+([{_GREEK_LOWER}]|[A-Za-z](?:_?[A-Za-z0-9]{{0,8}})?)"
+        rf"[^.。!?\n]{{0,30}}{_PERTURB_RE.pattern}",
+        re.IGNORECASE,
+    ),
+)
+_PARAM_BLACKLIST: frozenset[str] = frozenset(
+    {
+        "the", "a", "an", "this", "that", "we", "for", "of", "by", "at",
+        "in", "on", "to", "is", "are", "was", "were", "be", "been",
+        "and", "or", "with", "from", "as", "it", "its", "all", "each",
+    }
+)
+_FIG_ID_RE = re.compile(r"\[\[FIG:([a-z0-9_]+)\]\]")
+
 
 @dataclass
 class SensitivityFindings:
@@ -78,38 +111,9 @@ def mine_sensitivity_evidence(paper: PaperDraft) -> SensitivityFindings:
 
     # Parameter-count proxy: catalog short variable tokens that appear near
     # a perturbation phrase. Conservative — over-count is fine, under-count
-    # would let weak papers through.
+    # would let weak papers through. Regex patterns + blacklist live at
+    # module level (see `_PARAM_PATTERNS` above) so they compile once.
     parameter_tokens: set[str] = set()
-
-    # Patterns that explicitly bind a parameter to a perturbation phrase.
-    # Each pattern's group(1) is the parameter token.
-    _GREEK = "αβγδεζηθικλμνξορστυφχψω"
-    _PARAM_PATTERNS = [
-        # "perturbed α by ±10%" / "varying β over ±20%" / "increased X by 10%"
-        re.compile(
-            rf"(?:perturb(?:ed|ing)?|vary(?:ing)?|increas(?:e[ds]?|ing)|decreas(?:e[ds]?|ing)|chang(?:e[ds]?|ing))"
-            rf"\s+([{_GREEK}]|[A-Za-z](?:_?[A-Za-z0-9]{{0,8}})?)"
-            rf"\s+(?:by|of|over|at|with)?\s*{_PERTURB_RE.pattern}",
-            re.IGNORECASE,
-        ),
-        # "α by ±10%" / "γ at ±20%" / "X_init by 5%"
-        re.compile(
-            rf"\b([{_GREEK}]|[A-Za-z]_[A-Za-z0-9]{{1,8}}|[A-Za-z]{{1,3}})\s+(?:by|at|over)\s*{_PERTURB_RE.pattern}",
-            re.IGNORECASE,
-        ),
-        # "For α at ±10%" / "对 α 增减 10%"
-        re.compile(
-            rf"(?:For|对|参数)\s+([{_GREEK}]|[A-Za-z](?:_?[A-Za-z0-9]{{0,8}})?)"
-            rf"[^.。!?\n]{{0,30}}{_PERTURB_RE.pattern}",
-            re.IGNORECASE,
-        ),
-    ]
-
-    _PARAM_BLACKLIST = {
-        "the", "a", "an", "this", "that", "we", "for", "of", "by", "at",
-        "in", "on", "to", "is", "are", "was", "were", "be", "been",
-        "and", "or", "with", "from", "as", "it", "its", "all", "each",
-    }
 
     for sec in paper.sections:
         title = sec.title or ""
@@ -130,7 +134,7 @@ def mine_sensitivity_evidence(paper: PaperDraft) -> SensitivityFindings:
                     samples.append(m.group(0).strip()[:200])
         if any(tok in body.lower() for tok in _SENS_FIGURE_TOKENS):
             figure_refs = True
-        for fig_id_match in re.finditer(r"\[\[FIG:([a-z0-9_]+)\]\]", body):
+        for fig_id_match in _FIG_ID_RE.finditer(body):
             if any(tok in fig_id_match.group(1) for tok in _SENS_FIGURE_TOKENS):
                 figure_refs = True
 

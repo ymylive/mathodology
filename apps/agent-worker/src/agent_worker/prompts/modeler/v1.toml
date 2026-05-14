@@ -56,8 +56,6 @@ Respond with a single JSON object matching ModelSpec. Use ensure_ascii=False for
 
 [user_template]
 text = """
-{{ upstream_reminders }}
-
 Problem type: {{ competition_type }}
 
 Problem statement:
@@ -71,6 +69,8 @@ Retrieved methods from HMML (top 5 by BM25 relevance):
 
 Same-problem-type award-paper exemplars (structure reference, do NOT copy):
 {{ few_shot_exemplars }}
+
+{{ upstream_reminders }}
 
 Respond with a JSON object. Required top-level keys:
   chosen_approach (string),

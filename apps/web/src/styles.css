@@ -517,12 +517,15 @@ body.zh .workbench .hero-h {
 .workbench .panel-h { padding: 14px 18px; }
 .workbench .panel-b { padding: 18px; }
 
-/* 5-step pills */
+/* 6-step pills (analyzer / searcher / modeler / coder / writer / critic).
+   Previously hard-coded to 5, leaving the Critic pill wrapping out of the
+   visual flow. Round-6 UX audit (Agent C #1). */
 .steps {
-  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px; margin-bottom: 18px;
 }
-@media (max-width: 760px) { .steps { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 980px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px) { .steps { grid-template-columns: repeat(2, 1fr); } }
 .pill {
   padding: 10px 12px; border: 1px solid var(--rule); border-radius: 2px;
   background: var(--paper); position: relative;

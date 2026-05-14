@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, Literal
 
 import orjson
 from mm_contracts import (
@@ -71,8 +71,7 @@ class CoderDirective(BaseModel):
     # in the persistent Jupyter kernel; "matlab" hands the source to
     # MatlabSession (matlab -batch in prod, octave --no-gui in dev). State
     # does NOT persist across MATLAB turns — use .mat files for handoff.
-    # Unknown values are normalized to "python" by the agent.
-    language: str = "python"
+    language: Literal["python", "matlab"] = "python"
 
 
 class CoderAgent:

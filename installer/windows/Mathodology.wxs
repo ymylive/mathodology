@@ -6,7 +6,7 @@
       heat dir ..\..\apps\web\dist     -cg WebDistGroup    -gg -srd -dr WEBDIR    -var var.WebDistSrc    -out auto-web.wxs
       heat dir ..\..\apps\agent-worker -cg WorkerGroup     -gg -srd -dr WORKERDIR -var var.WorkerSrc     -out auto-worker.wxs
       heat dir ..\..\packages\py-contracts -cg PyContractsGroup -gg -srd -dr PYCDIR -var var.PyContractsSrc -out auto-pycontracts.wxs
-      candle Mathodology.wxs auto-web.wxs auto-worker.wxs auto-pycontracts.wxs ^
+      candle -ext WixUtilExtension Mathodology.wxs auto-web.wxs auto-worker.wxs auto-pycontracts.wxs ^
              -dWebDistSrc=..\..\apps\web\dist ^
              -dWorkerSrc=..\..\apps\agent-worker ^
              -dPyContractsSrc=..\..\packages\py-contracts

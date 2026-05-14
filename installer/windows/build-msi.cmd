@@ -41,8 +41,10 @@ REM the .cmd in CWD before resolving heat.exe on PATH, so calling `heat`
 REM bare would recurse into our own script (STATUS_STACK_OVERFLOW).
 call "%HERE%harvest.cmd" || exit /b 1
 
-REM 2. compile.
+REM 2. compile. WixUtilExtension is needed here too because candle.exe
+REM validates the util:EnvironmentVariable element before light.exe links.
 candle.exe -nologo -arch x64 ^
+       -ext WixUtilExtension ^
        -dVersion=%WIX_VERSION% ^
        -dWebDistSrc=%ROOT%\apps\web\dist ^
        -dWorkerSrc=%ROOT%\apps\agent-worker ^

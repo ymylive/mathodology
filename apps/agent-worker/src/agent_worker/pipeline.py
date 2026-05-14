@@ -165,7 +165,17 @@ async def _review_and_maybe_revise(
     policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
     estimated_review_cost_rmb: float | None = None,
     estimated_revision_cost_rmb: float | None = None,
+    reminders_out: dict[str, str] | None = None,
 ) -> BaseModel:
+    """Critic-driven review with up to `max_revision_rounds` retries.
+
+    When `reminders_out` is provided, the FINAL accepted verdict's
+    `additional_context` (computed by `critique_to_hook_result`) is
+    written into it under the *next* stage's name. Downstream agents
+    then render this string as a `<system_reminder>` block in their
+    user prompt — that's how Critic minor-finding feedback flows
+    forward without a full revision round.
+    """
     review_cost_rmb = (
         policy.estimated_review_cost_rmb
         if estimated_review_cost_rmb is None
@@ -243,7 +253,11 @@ async def _review_and_maybe_revise(
     hook_result = critique_to_hook_result(report)
     agg = aggregate([hook_result])
     reminder = agg.merged_reminder()
+    next_stage = _next_stage_after(target_agent)
     if reminder:
+        if reminders_out is not None and next_stage is not None:
+            reminders_out[next_stage] = reminder
+
         import contextlib
 
         # Critic exposes `emitter` on all current builds; suppress just in
@@ -255,7 +269,7 @@ async def _review_and_maybe_revise(
                 {
                     "level": "info",
                     "message": "post-stage reminder available for downstream",
-                    "for_stage": _next_stage_after(target_agent),
+                    "for_stage": next_stage,
                     "reminder_chars": len(reminder),
                     "reminder": reminder,
                 },
@@ -273,6 +287,7 @@ async def _review_and_maybe_rerun_coder(
     spec: ModelSpec,
     coder_out: CoderOutput,
     policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
+    reminders_out: dict[str, str] | None = None,
 ) -> CoderOutput:
     criteria = [
         "Executed cells support the model specification.",
@@ -352,6 +367,15 @@ async def _review_and_maybe_rerun_coder(
 
     if _critique_should_fail_run(report):
         raise AgentError(f"Critic rejected coder after revision: {report.summary}")
+
+    # Same post-stage hook lifecycle as _review_and_maybe_revise — surface
+    # a `<system_reminder>` for the next stage (writer) when the final
+    # verdict has minor findings worth carrying forward.
+    hook_result = critique_to_hook_result(report)
+    agg = aggregate([hook_result])
+    reminder = agg.merged_reminder()
+    if reminder and reminders_out is not None:
+        reminders_out["writer"] = reminder
     return current
 
 
@@ -385,6 +409,13 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 "model_override": problem.model_override,
             }
 
+            # Shared dict for post-stage hook reminders. Keys are stage
+            # names ("searcher", "modeler", "coder", "writer"). Each entry
+            # is a `<system_reminder>` XML block produced by
+            # `critique_to_hook_result()` after the upstream Critic verdict.
+            # Downstream agents render it into their user_template.
+            upstream_reminders: dict[str, str] = {}
+
             analyzer = AnalyzerAgent(gateway, emitter, **kwargs)
             critic = CriticAgent(gateway, emitter, **kwargs)
             analysis = await analyzer.run_for_problem(problem)
@@ -403,11 +434,16 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                     "Lists concrete data requirements.",
                     "Proposes at least one usable modeling approach.",
                 ],
+                reminders_out=upstream_reminders,
             )
             assert isinstance(analysis, AnalyzerOutput)
 
             searcher = SearcherAgent(gateway, emitter, runs_dir=runs_dir, **kwargs)
-            findings = await searcher.run_for(problem, analysis)
+            findings = await searcher.run_for(
+                problem,
+                analysis,
+                upstream_reminders=upstream_reminders.get("searcher", ""),
+            )
             findings = await _review_and_maybe_revise(
                 critic=critic,
                 producer=searcher,
@@ -419,11 +455,16 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                     "analysis": analysis.model_dump(mode="json"),
                 },
                 criteria=_searcher_review_criteria(),
+                reminders_out=upstream_reminders,
             )
             assert isinstance(findings, SearchFindings)
 
             modeler = ModelerAgent(gateway, emitter, hmml=hmml, **kwargs)
-            spec = await modeler.run_for(problem, analysis)
+            spec = await modeler.run_for(
+                problem,
+                analysis,
+                upstream_reminders=upstream_reminders.get("modeler", ""),
+            )
             spec = await _review_and_maybe_revise(
                 critic=critic,
                 producer=modeler,
@@ -439,13 +480,19 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                     "Algorithm outline is executable by Coder.",
                     "Validation strategy is concrete.",
                 ],
+                reminders_out=upstream_reminders,
             )
             assert isinstance(spec, ModelSpec)
 
             coder = CoderAgent(
                 gateway, emitter, kernel, matlab_session=matlab_session, **kwargs
             )
-            coder_out = await coder.run(problem, analysis, spec)
+            coder_out = await coder.run(
+                problem,
+                analysis,
+                spec,
+                upstream_reminders=upstream_reminders.get("coder", ""),
+            )
             coder_out = await _review_and_maybe_rerun_coder(
                 critic=critic,
                 coder=coder,
@@ -453,11 +500,17 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 analysis=analysis,
                 spec=spec,
                 coder_out=coder_out,
+                reminders_out=upstream_reminders,
             )
 
             writer = WriterAgent(gateway, emitter, run_dir=run_dir, **kwargs)
             paper = await writer.run_for(
-                problem, analysis, spec, coder_out, findings
+                problem,
+                analysis,
+                spec,
+                coder_out,
+                findings,
+                upstream_reminders=upstream_reminders.get("writer", ""),
             )
 
             # Deterministic evidence mining: surface concrete facts about the
@@ -500,6 +553,7 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 producer=writer,
                 target_agent="writer",
                 output=paper,
+                reminders_out=upstream_reminders,  # final stage; for post-mortem
                 context={
                     "problem_text": problem.problem_text,
                     "competition_type": problem.competition_type,

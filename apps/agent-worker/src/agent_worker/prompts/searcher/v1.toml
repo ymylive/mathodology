@@ -52,6 +52,8 @@ Return a JSON object matching SearchFindings. No prose, no markdown fences.
 
 [user_template]
 text = """
+{{ upstream_reminders }}
+
 Problem type: {{ competition_type }}
 Problem: {{ problem_text }}
 

@@ -43,6 +43,7 @@ from mm_contracts import (
 from pydantic import ValidationError
 
 from agent_worker.agents.base import AgentError, AgentParseError
+from agent_worker.compactor import CompactionPolicy, PaperCompactor
 from agent_worker.config import get_settings
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
@@ -118,35 +119,18 @@ _log = logging.getLogger(__name__)
 
 
 # --- PDF enrichment / compaction tuning -------------------------------------
+# Kept as module-level constants so external callers / tests can import them.
+# The actual prompts + circuit-breaker + threshold logic now live in the
+# shared `agent_worker.compactor.PaperCompactor` subclass — these values feed
+# its `CompactionPolicy`.
 COMPACT_THRESHOLD_CHARS = 24_000
 COMPACT_TARGET_CHARS = 24_000
 COMPACT_MIN_OUTPUT_CHARS = 1_000
 
-_COMPACT_SYSTEM_PROMPT = """You compress an academic paper into a high-density summary for downstream LLM citation. Preserve verbatim:
-- Mathematical formulas (LaTeX or plain)
-- Parameter definitions and units
-- Methodology steps in order
-- Experimental setup (sample size, data source, conditions)
-- Numerical results with confidence intervals or error bars
-- Key claims that Writer might cite
-
-Drop entirely:
-- Boilerplate (acknowledgments, ethics, conflicts of interest)
-- Related-work prose (the Writer has SearchFindings.papers for that)
-- Narrative filler ("In this paper we propose...")
-- Reference list
-- Repeated information
-
-Preserve the source language. If the input is Chinese, output Chinese.
-If English, output English. Do not translate.
-
-Output: dense markdown, ≤24000 characters. Keep section headings
-(## Methods, ## Results, etc.) so Writer can grep for them.
-Respond with the compacted markdown only."""
-
 # Sentinel for _stream_and_collect's default. Passing response_format=None
-# explicitly disables the JSON-object constraint (used by _compact_one); the
-# default preserves backward compat for _ask_llm / _refine_queries.
+# explicitly disables the JSON-object constraint (used by the compaction
+# caller below); the default preserves backward compat for _ask_llm /
+# _refine_queries.
 _DEFAULT_JSON_RESPONSE_FORMAT: dict[str, Any] = {"type": "json_object"}
 
 
@@ -175,7 +159,10 @@ class SearcherAgent:
         self._runs_dir: Path | None = runs_dir
 
     async def run_for(
-        self, problem: ProblemInput, analysis: AnalyzerOutput
+        self,
+        problem: ProblemInput,
+        analysis: AnalyzerOutput,
+        upstream_reminders: str = "",
     ) -> SearchFindings:
         """Build queries → arXiv + configured web source(s) → LLM synthesize."""
         t0 = time.monotonic()
@@ -568,7 +555,9 @@ class SearcherAgent:
             )
             findings = SearchFindings(queries=queries)
         else:
-            findings = await self._synthesize(problem, analysis, queries, unique)
+            findings = await self._synthesize(
+                problem, analysis, queries, unique, upstream_reminders
+            )
 
         # Phase 3.5/3.6: enrich top papers with full text + compact oversized files.
         # Skip when runs_dir wasn't injected (test fixtures) or there are no
@@ -830,6 +819,34 @@ class SearcherAgent:
             )
             return raw_queries
 
+    def _build_paper_compactor(self) -> PaperCompactor:
+        """Construct a PaperCompactor wired to this agent's gateway.
+
+        The caller closure routes the compactor's LLM call through the same
+        streaming gateway as the rest of Searcher (with `response_format=None`
+        so the model returns markdown, not JSON).
+        """
+        model = self._model_override or self.prompt.model_preference[0]
+
+        async def _caller(*, system: str, user: str, model: str) -> str:
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            return await self._stream_and_collect(
+                model, messages, response_format=None
+            )
+
+        return PaperCompactor(
+            _caller,
+            model=model,
+            policy=CompactionPolicy(
+                threshold_chars=COMPACT_THRESHOLD_CHARS,
+                target_chars=COMPACT_TARGET_CHARS,
+                min_output_chars=COMPACT_MIN_OUTPUT_CHARS,
+            ),
+        )
+
     async def _compact_oversized_papers(
         self, runs_papers_dir: Path, paths: list[str]
     ) -> list[str]:
@@ -839,7 +856,12 @@ class SearcherAgent:
         the Writer side has its own char-budget soft truncation as a safety
         net. Returns the same paths argument unchanged (compaction never drops
         a paper; it either improves the file or leaves it alone).
+
+        The actual threshold + LLM + circuit-breaker logic lives in
+        `PaperCompactor`; this method handles only the filesystem orchestration
+        and per-file emitter logging.
         """
+        compactor = self._build_paper_compactor()
         run_dir = runs_papers_dir.parent
         for rel_path in paths:
             abs_path = run_dir / rel_path
@@ -857,61 +879,36 @@ class SearcherAgent:
                 continue
             if len(raw) <= COMPACT_THRESHOLD_CHARS:
                 continue
-            compacted = await self._compact_one(raw)
-            if not compacted or len(compacted) < COMPACT_MIN_OUTPUT_CHARS:
+            result = await compactor.compact(raw)
+            if not result.was_compacted:
+                # PaperCompactor returns the original text on every non-success
+                # path (LLM error, too-short output, no compression, breaker
+                # tripped). Surface the reason so failures are debuggable.
                 await self.emitter.emit(
                     "log",
                     {
                         "level": "warning",
                         "message": (
                             f"compact: keeping raw for {rel_path} "
-                            f"(compaction unusable)"
+                            f"(compaction unusable: {result.failure_reason})"
                         ),
                     },
                     agent=self.AGENT_NAME,
                 )
                 continue
-            abs_path.write_text(compacted, encoding="utf-8")
+            abs_path.write_text(result.compacted, encoding="utf-8")
             await self.emitter.emit(
                 "log",
                 {
                     "level": "info",
                     "message": (
-                        f"compact: {rel_path} {len(raw)} → {len(compacted)} chars"
+                        f"compact: {rel_path} {result.original_chars} → "
+                        f"{result.compacted_chars} chars"
                     ),
                 },
                 agent=self.AGENT_NAME,
             )
         return paths
-
-    async def _compact_one(self, raw_text: str) -> str | None:
-        """Run one LLM call to compress raw paper text. None on failure."""
-        model = self._model_override or self.prompt.model_preference[0]
-        user_text = (
-            "Compact this paper text into ≤24000 characters of dense markdown, "
-            "preserving the source language verbatim.\n\nRaw paper text:\n\n"
-            + raw_text
-        )
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": _COMPACT_SYSTEM_PROMPT},
-            {"role": "user", "content": user_text},
-        ]
-        try:
-            text = await self._stream_and_collect(
-                model, messages, response_format=None
-            )
-        except Exception as e:  # noqa: BLE001
-            await self.emitter.emit(
-                "log",
-                {
-                    "level": "warning",
-                    "message": f"compact: LLM call failed: {e}",
-                },
-                agent=self.AGENT_NAME,
-            )
-            return None
-        text = text.strip() if isinstance(text, str) else ""
-        return text or None
 
     async def _synthesize(
         self,
@@ -919,6 +916,7 @@ class SearcherAgent:
         analysis: AnalyzerOutput,
         queries: list[str],
         papers: list[Paper],
+        upstream_reminders: str = "",
     ) -> SearchFindings:
         """One LLM call to triage + summarize the retrieved papers."""
         model = self._model_override or self.prompt.model_preference[0]
@@ -949,6 +947,7 @@ class SearcherAgent:
                         papers_payload, ensure_ascii=False, indent=2
                     ),
                     queries_json=json.dumps(queries, ensure_ascii=False),
+                    upstream_reminders=upstream_reminders,
                 ),
             },
         ]

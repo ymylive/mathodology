@@ -132,6 +132,8 @@ If you see `few_shot_exemplars` in the user message, those are summary excerpts 
 
 [user_template]
 text = """
+{{ upstream_reminders }}
+
 Problem type: {{ competition_type }}
 
 Problem statement:

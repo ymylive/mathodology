@@ -17,6 +17,7 @@ import { http } from "@/api/http";
 import T from "@/components/T.vue";
 import { useI18n } from "@/composables/useI18n";
 import { useCountUp } from "@/composables/useCountUp";
+import { formatCurrency, formatPercent } from "@/utils/format";
 import {
   fetchSummary,
   fetchProviderShare,
@@ -200,7 +201,7 @@ function costTag(r: RunSummary): string {
   if (r.status === "queued") return "—";
   const c = r.cost_rmb;
   if (typeof c !== "number" || Number.isNaN(c)) return "—";
-  return `¥${c.toFixed(2)}`;
+  return formatCurrency(c, i18n.lang, 2);
 }
 
 // --- 7-day activity ---------------------------------------------------------
@@ -291,13 +292,13 @@ function barHeight(count: number): string {
         </div>
         <div class="stat">
           <div class="k"><T en="Success" zh="成功率" /></div>
-          <div class="v" v-if="hasRuns24h">{{ successDisplay.toFixed(1) }}%</div>
+          <div class="v" v-if="hasRuns24h">{{ formatPercent(successDisplay, i18n.lang, 1) }}</div>
           <div class="v" v-else-if="summaryLoaded">—</div>
           <div class="v dim-inline" v-else>…</div>
         </div>
         <div class="stat">
           <div class="k"><T en="Median cost" zh="成本中位" /></div>
-          <div class="v" v-if="costCellRender">¥ {{ costDisplay.toFixed(2) }}</div>
+          <div class="v" v-if="costCellRender">{{ formatCurrency(costDisplay, i18n.lang, 2) }}</div>
           <div class="v" v-else-if="summaryLoaded">—</div>
           <div class="v dim-inline" v-else>…</div>
         </div>
@@ -413,7 +414,7 @@ function barHeight(count: number): string {
                 class="mono"
                 style="font-size:11px; color:var(--ink-3);"
               >
-                ¥ {{ providers.total_cost_rmb.toFixed(2) }} · 7d
+                {{ formatCurrency(providers.total_cost_rmb, i18n.lang, 2) }} · 7d
               </span>
             </div>
             <div class="panel-b">
@@ -447,7 +448,7 @@ function barHeight(count: number): string {
                       ></span>
                     </div>
                   </div>
-                  <div class="pct">{{ p.share_pct.toFixed(1) }}%</div>
+                  <div class="pct">{{ formatPercent(p.share_pct, i18n.lang, 1) }}</div>
                 </div>
               </div>
             </div>

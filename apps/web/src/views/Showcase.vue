@@ -10,6 +10,10 @@ import T from "@/components/T.vue";
 import { useCountUp } from "@/composables/useCountUp";
 import { useInView } from "@/composables/useInView";
 import { fetchSummary, type StatsSummary } from "@/api/stats";
+import { useI18n } from "@/composables/useI18n";
+import { formatCurrency, formatPercent } from "@/utils/format";
+
+const i18n = useI18n();
 
 const summary = ref<StatsSummary | null>(null);
 const loaded = ref(false);
@@ -296,7 +300,7 @@ const p95Cell = computed<StatCell>(() => ({
               <div class="stat-row" ref="statsStrip">
                 <div>
                   <div class="n" v-if="successCell.render">
-                    {{ successDisplay.toFixed(1) }}%
+                    {{ formatPercent(successDisplay, i18n.lang, 1) }}
                   </div>
                   <div class="n" v-else>—</div>
                   <div class="l">
@@ -308,7 +312,7 @@ const p95Cell = computed<StatCell>(() => ({
                 </div>
                 <div>
                   <div class="n" v-if="costCell.render">
-                    ¥ {{ costDisplay.toFixed(2) }}
+                    {{ formatCurrency(costDisplay, i18n.lang, 2) }}
                   </div>
                   <div class="n" v-else>—</div>
                   <div class="l">

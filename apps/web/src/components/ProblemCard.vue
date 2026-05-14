@@ -79,6 +79,7 @@ function submit() {
             type="button"
             :disabled="disabled || mode === 'active'"
             :class="{ on: (mode === 'active' ? (competition ?? '').toLowerCase() === c.id : settings.competition === c.id) }"
+            :aria-pressed="(mode === 'active' ? (competition ?? '').toLowerCase() === c.id : settings.competition === c.id)"
             @click="pickCompetition(c.id)"
           >
             {{ i18n.t(c.en, c.zh) }}

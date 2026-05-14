@@ -66,6 +66,7 @@ from agent_worker.gateway_client import GatewayClient
 from agent_worker.hmml import HMMLService
 from agent_worker.kernel import KernelSession
 from agent_worker.matlab import MatlabSession
+from agent_worker.skills import SkillRegistry, load_skills_dir
 
 _log = logging.getLogger(__name__)
 
@@ -116,6 +117,27 @@ def _get_hmml() -> HMMLService | None:
         _log.warning("HMML seed dir is empty; Modeler will run without it.")
         return None
     return service
+
+
+def _load_pipeline_skills() -> SkillRegistry:
+    """Load the SKILL.md files from ``docs/skills`` for on-demand body lookup.
+
+    Resolution walks up from this file to find ``docs/skills`` so the
+    function works both from the installed package and the source tree.
+    Missing dir is non-fatal — registry is just empty and the Coder skips
+    the get_skill tool entirely.
+    """
+    here = Path(__file__).resolve()
+    for ancestor in here.parents:
+        candidate = ancestor / "docs" / "skills"
+        if candidate.exists():
+            try:
+                return load_skills_dir(candidate)
+            except Exception as e:  # noqa: BLE001 — skill discovery must never fail a run
+                _log.warning("skill discovery failed at %s: %s", candidate, e)
+                return SkillRegistry([])
+    _log.debug("no docs/skills directory found; skill tool will be inert")
+    return SkillRegistry([])
 
 
 def _critique_requires_revision(
@@ -459,6 +481,13 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
     # cell when the Coder picks language='matlab' rather than crashing the run.
     matlab_session = MatlabSession(run_id, runs_dir)
     hmml = _get_hmml()
+    # Skill registry — round-8 on-demand body loading. CoderAgent renders
+    # the frontmatter-only menu into its system prompt and looks up bodies
+    # via `get_skill` only when it decides one is relevant, instead of
+    # eagerly inlining all 8+ kernel/MATLAB skill bodies into every turn.
+    # Empty registry (no docs/skills/* on disk) is a clean no-op — the
+    # tool simply isn't exposed to the LLM.
+    skill_registry: SkillRegistry = _load_pipeline_skills()
 
     try:
         try:
@@ -570,7 +599,12 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
 
             await cancel.check_or_raise()
             coder = CoderAgent(
-                gateway, emitter, kernel, matlab_session=matlab_session, **kwargs
+                gateway,
+                emitter,
+                kernel,
+                matlab_session=matlab_session,
+                skill_registry=skill_registry,
+                **kwargs,
             )
             coder_out = await coder.run(
                 problem,

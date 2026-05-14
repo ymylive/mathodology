@@ -143,6 +143,7 @@ const isReasoningModel = computed(() => REASONING_MODEL_RE.test(settings.model))
             :key="e.id"
             type="button"
             :class="{ on: settings.reasoningEffort === e.id }"
+            :aria-pressed="settings.reasoningEffort === e.id"
             :disabled="readonly"
             @click="settings.setReasoningEffort(e.id)"
           >
@@ -165,6 +166,7 @@ const isReasoningModel = computed(() => REASONING_MODEL_RE.test(settings.model))
           <button
             type="button"
             :class="{ on: !settings.longContext }"
+            :aria-pressed="!settings.longContext"
             :disabled="readonly"
             @click="settings.setLongContext(false)"
           >
@@ -173,6 +175,7 @@ const isReasoningModel = computed(() => REASONING_MODEL_RE.test(settings.model))
           <button
             type="button"
             :class="{ on: settings.longContext }"
+            :aria-pressed="settings.longContext"
             :disabled="readonly"
             @click="settings.setLongContext(true)"
           >
@@ -195,6 +198,7 @@ const isReasoningModel = computed(() => REASONING_MODEL_RE.test(settings.model))
             :key="r.id"
             type="button"
             :class="{ on: settings.routing === r.id }"
+            :aria-pressed="settings.routing === r.id"
             :disabled="readonly"
             @click="settings.setRouting(r.id)"
           >
@@ -211,6 +215,7 @@ const isReasoningModel = computed(() => REASONING_MODEL_RE.test(settings.model))
             :key="n"
             type="button"
             :class="{ on: settings.retry === n }"
+            :aria-pressed="settings.retry === n"
             :disabled="readonly"
             @click="settings.setRetry(n)"
           >
@@ -225,6 +230,7 @@ const isReasoningModel = computed(() => REASONING_MODEL_RE.test(settings.model))
           <button
             type="button"
             :class="{ on: !settings.hmml }"
+            :aria-pressed="!settings.hmml"
             :disabled="readonly"
             @click="settings.setHmml(false)"
           >
@@ -233,6 +239,7 @@ const isReasoningModel = computed(() => REASONING_MODEL_RE.test(settings.model))
           <button
             type="button"
             :class="{ on: settings.hmml }"
+            :aria-pressed="settings.hmml"
             :disabled="readonly"
             @click="settings.setHmml(true)"
           >

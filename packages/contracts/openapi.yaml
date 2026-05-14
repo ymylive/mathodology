@@ -173,13 +173,15 @@ components:
         reasoning_effort:
           type: string
           enum: [off, low, medium, high]
-          default: medium
+          default: high
           description: |
             Cross-provider reasoning-effort hint. Translated in the gateway to
             each provider's native API: OpenAI-compat emits `reasoning_effort`
             + `reasoning.effort`; Anthropic emits
             `thinking.budget_tokens` (low=1024, medium=4096, high=16384).
             `off` suppresses emission entirely.
+            Default `high`: this project targets MCM Outstanding / CUMCM 一等奖
+            quality, so we trade extra latency + cost for better reasoning.
 
     Attachment:
       type: object

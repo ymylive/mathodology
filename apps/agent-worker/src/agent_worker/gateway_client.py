@@ -33,6 +33,32 @@ class GatewayClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def export_paper(
+        self,
+        *,
+        run_id: UUID,
+        format: str,
+        template: str | None = None,
+        compile_timeout_s: float = 300.0,
+    ) -> bytes:
+        """Fetch a rendered paper artifact (pdf/tex/docx/md) as raw bytes.
+
+        Long timeout because tectonic's first invocation downloads ~200 MB
+        of TeXLive bundles. Subsequent runs are ~30-60s.
+        """
+        url = f"{self._base}/runs/{run_id}/export/{format}"
+        params: dict[str, str] = {}
+        if template:
+            params["template"] = template
+        resp = await self._client.get(
+            url,
+            headers=self._headers,
+            params=params or None,
+            timeout=httpx.Timeout(compile_timeout_s, connect=5.0, read=compile_timeout_s),
+        )
+        resp.raise_for_status()
+        return resp.content
+
     def _build_headers(self, run_id: UUID, agent: str) -> dict[str, str]:
         return {
             **self._headers,

@@ -76,7 +76,9 @@ class ProblemInput(BaseModel):
     competition_type: CompetitionType = "other"
     attachments: list[Attachment] = Field(default_factory=list)
     model_override: str | None = None
-    reasoning_effort: ReasoningEffort = "medium"
+    # Default "high" project-wide: this agent targets MCM Outstanding / CUMCM 一等奖,
+    # so we trade extra latency + cost for stronger reasoning. Override per-run if needed.
+    reasoning_effort: ReasoningEffort = "high"
     # Opt-in to a 1M-token max_tokens ceiling for models that advertise
     # long-context. When false, we cap at 20k (safe for all providers).
     # User-supplied: disable for default models, enable only for 1M-
@@ -360,6 +362,11 @@ class CellExecution(BaseModel):
     )  # relative to run dir, e.g. figures/fig-0.png
     error: str | None = None  # kernel error message, if any
     duration_ms: int = 0
+    # Which execution backend ran this cell. "python" hits the Jupyter
+    # kernel (numpy/scipy/pandas stack). "matlab" routes to MatlabSession
+    # (matlab -batch or octave --no-gui). Default "python" so old payloads
+    # remain valid; the CoderAgent picks per-turn from `CoderDirective.language`.
+    language: str = "python"
 
 
 class Figure(BaseModel):

@@ -92,7 +92,10 @@ def test_substitute_known_placeholder_replaces_with_markdown_image() -> None:
     body = out.sections[0].body_markdown
     assert "[[FIG:" not in body
     assert "![ρ vs L](figures/rho_vs_l.png)" in body
-    assert "*图: ρ vs L*" in body
+    # We deliberately no longer emit the bilingual `*图: ...*` line — it
+    # leaked into the final PDF as raw text. The caption is carried in the
+    # image alt and the Writer's surrounding prose.
+    assert "*图:" not in body
 
 
 def test_substitute_unknown_placeholder_is_dropped_with_warning(

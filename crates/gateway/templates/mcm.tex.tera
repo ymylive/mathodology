@@ -19,6 +19,16 @@
 \providecommand{\passthrough}[1]{#1}{% endraw %}
 
 \usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{calc}
+{% raw %}
+% Pandoc longtable compatibility (its emitted TeX uses these):
+\providecommand{\real}[1]{#1}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\newcounter{none}
+{% endraw %}
+\usepackage{array}
 \usepackage{enumitem}
 \usepackage{float}
 \usepackage{hyperref}
@@ -69,7 +79,7 @@
 \end{center}
 
 {\small
-{{ abstract | latex_escape }}
+{{ abstract_latex | safe }}
 }
 
 \vspace{1em}

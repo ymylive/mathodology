@@ -38,7 +38,7 @@ class BaseAgent:
         gateway: GatewayClient,
         emitter: EventEmitter,
         prompt_version: str = "v1",
-        run_effort: ReasoningEffort = "medium",
+        run_effort: ReasoningEffort = "high",
         long_context: bool = False,
         model_override: str | None = None,
     ) -> None:
@@ -166,7 +166,13 @@ class BaseAgent:
         critique: CritiqueReport,
         context: dict[str, Any],
     ) -> BaseModel:
-        """Ask the producing agent to revise its own structured output once."""
+        """Ask the producing agent to revise its own structured output.
+
+        Mirrors `run()`'s parse-retry-once policy: long-generation runs on
+        some models (e.g. gpt-5.5) occasionally emit token-level corruption
+        in the JSON stream. Without retry, a single bad reroll fails the
+        whole pipeline. We do one retry with the parse error appended.
+        """
         model = self._model_override or self.prompt.model_preference[0]
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.prompt.system["text"]},
@@ -186,8 +192,27 @@ class BaseAgent:
                 ),
             },
         ]
-        text = await self._stream_and_collect(model, messages)
-        return self._parse_output(text)
+        last_err: Exception | None = None
+        for _attempt in range(2):
+            try:
+                text = await self._stream_and_collect(model, messages)
+                return self._parse_output(text)
+            except AgentParseError as e:
+                last_err = e
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your previous revision could not be parsed as JSON "
+                            f"matching {self.OUTPUT_MODEL.__name__}. Error: {e}. "
+                            f"Return ONLY a valid JSON object this time, "
+                            f"with all field names quoted correctly and no token-level corruption."
+                        ),
+                    }
+                )
+        raise AgentError(
+            f"{self.AGENT_NAME} revision produced unparseable output after 2 attempts"
+        ) from last_err
 
 
 async def _stream_with_retry(
@@ -204,11 +229,13 @@ async def _stream_with_retry(
 ) -> str:
     """Stream + collect with retries against upstream flakiness.
 
-    Handles two failure modes uniformly:
+    Handles three failure modes uniformly:
     - Transport exceptions from httpx (RemoteProtocolError / ReadTimeout /
       ConnectError / PoolTimeout)
     - Empty stream completion: 200 OK with zero content deltas (seen on
       cornna/gpt-5.4 intermittently)
+    - HTTP 5xx from the gateway (upstream provider timeout / network error
+      surfaces as 502/503/504; we treat these as transient and retry)
 
     Backoff schedule: 0s, 5s, 15s, 30s before attempts 1..4. Shared by
     BaseAgent subclasses and CoderAgent (which does not inherit BaseAgent).
@@ -258,6 +285,12 @@ async def _stream_with_retry(
             httpx.ConnectError,
             httpx.PoolTimeout,
         ) as e:
+            last_err = e
+        except httpx.HTTPStatusError as e:
+            # 5xx → upstream had a transient problem; retry. 4xx is our bug
+            # (auth, malformed request) and should fail loud, not retry.
+            if e.response.status_code < 500:
+                raise
             last_err = e
     raise AgentError(
         f"{agent_name} stream failed after {len(BACKOFFS)} attempts: {last_err}"

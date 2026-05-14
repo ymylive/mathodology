@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     worker_concurrency: int = Field(default=2, alias="WORKER_CONCURRENCY")
     runs_dir: str = Field(default="./runs", alias="RUNS_DIR")
 
+    # --- PDF auto-export --------------------------------------------------
+    # After the Writer produces paper.md, the worker calls the gateway's
+    # /export/pdf endpoint and writes paper.pdf into the run dir. The PDF
+    # path is then included in the terminal `done` event. Failure does NOT
+    # fail the run — paper.md remains the source of truth.
+    auto_export_pdf: bool = Field(default=True, alias="MM_AUTO_EXPORT_PDF")
+    # tectonic cold-start downloads ~200 MB of TeXLive on the first compile;
+    # subsequent runs are ~30-60s. Allow a generous ceiling.
+    auto_export_timeout_s: float = Field(
+        default=600.0, alias="MM_AUTO_EXPORT_TIMEOUT_S"
+    )
+
     # --- open-webSearch MCP (Searcher auxiliary retrieval) ----------------
     # Node CLI that speaks MCP over stdio. Defaults to the binary on PATH;
     # absolute path (e.g. /opt/homebrew/bin/open-websearch) is fine too.

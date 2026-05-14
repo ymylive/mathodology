@@ -140,24 +140,28 @@ class BaseAgent:
         )
 
     def _parse_output(self, text: str) -> BaseModel:
-        """Strip markdown fences, parse JSON, validate against OUTPUT_MODEL."""
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            # Drop the opening fence line (``` or ```json etc.)
-            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else ""
-            if cleaned.endswith("```"):
-                cleaned = cleaned.rsplit("```", 1)[0]
-            cleaned = cleaned.strip()
+        """Strip markdown fences, parse JSON (lenient), validate against OUTPUT_MODEL.
 
-        try:
-            obj = orjson.loads(cleaned)
-        except Exception as e:
-            raise AgentParseError(f"not valid JSON: {e}") from e
+        Two robustness tricks borrowed from claude-code-sourcemap
+        (`utils/json.ts`, `utils/toolErrors.ts`):
 
+        1. **Lenient JSON parse via raw_decode prefix recovery.** Long
+           generations sometimes append trailing text after the JSON object
+           (e.g. ``"…}\n\nNote: the above…"``). Strict `orjson.loads`
+           rejects the whole blob; the stdlib `json.JSONDecoder.raw_decode`
+           cleanly extracts the prefix and we discard the tail.
+        2. **LLM-friendly Pydantic error rewrite.** Raw Pydantic
+           `ValidationError.__str__()` is verbose URL-laden prose; the
+           rewritten format mirrors sourcemap's `formatZodValidationError`
+           and dramatically lifts retry success rates by listing concrete
+           "missing field X" / "unexpected field Y" bullets.
+        """
+        cleaned = _strip_json_fence(text)
+        obj = _parse_json_lenient(cleaned)
         try:
             return self.OUTPUT_MODEL.model_validate(obj)
         except ValidationError as e:
-            raise AgentParseError(str(e)) from e
+            raise AgentParseError(_format_validation_error(e)) from e
 
     async def revise_with_critique(
         self,
@@ -295,6 +299,76 @@ async def _stream_with_retry(
     raise AgentError(
         f"{agent_name} stream failed after {len(BACKOFFS)} attempts: {last_err}"
     ) from last_err
+
+
+def _strip_json_fence(text: str) -> str:
+    """Drop a leading ``` / ```json line and a trailing ``` if present."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else ""
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+    return cleaned.strip()
+
+
+def _parse_json_lenient(text: str) -> Any:
+    """Strict parse first, then fall back to raw_decode prefix recovery.
+
+    Recovers the case where the model emitted a valid JSON object followed
+    by free-form prose (a known gpt-5.5 failure mode on long generations).
+    """
+    import json as _stdlib_json  # local import keeps base.py header clean
+
+    try:
+        return orjson.loads(text)
+    except Exception:  # orjson.JSONDecodeError or generic
+        pass
+    try:
+        obj, end = _stdlib_json.JSONDecoder().raw_decode(text)
+        if end < len(text.rstrip()):
+            # Trailing junk was discarded — not an error, just a recovery.
+            pass
+        return obj
+    except _stdlib_json.JSONDecodeError as e:
+        raise AgentParseError(f"not valid JSON (raw_decode failed at pos {e.pos}): {e.msg}") from e
+
+
+def _format_validation_error(err: ValidationError) -> str:
+    """LLM-friendly rewrite of Pydantic validation errors.
+
+    Mirrors claude-code-sourcemap's `formatZodValidationError` — produces
+    short bullet lines like ``- Required field `references[0].doi` is missing``
+    instead of the default URL-laden prose. The downstream
+    `revise_with_critique` loop appends this verbatim to the next-turn
+    user message, so concise + actionable wins big.
+    """
+    issues = err.errors()
+    if not issues:
+        return str(err)
+    parts: list[str] = []
+    for issue in issues:
+        loc = ".".join(
+            f"[{p}]" if isinstance(p, int) else str(p) for p in issue.get("loc", ())
+        )
+        if not loc:
+            loc = "<root>"
+        t = issue.get("type", "")
+        msg = issue.get("msg", "")
+        if t == "missing":
+            parts.append(f"- Required field `{loc}` is missing")
+        elif t == "extra_forbidden":
+            parts.append(f"- Unexpected field `{loc}` (this schema forbids extras)")
+        elif "type" in t or t in {"string_type", "int_type", "float_type", "bool_type", "list_type"}:
+            got = issue.get("input")
+            got_repr = (
+                f"{type(got).__name__} {got!r}"
+                if got is not None
+                else "null"
+            )
+            parts.append(f"- Field `{loc}`: {msg}; got {got_repr}")
+        else:
+            parts.append(f"- `{loc}`: {msg}")
+    return f"{len(issues)} validation issue(s):\n" + "\n".join(parts)
 
 
 __all__ = ["AgentError", "AgentParseError", "BaseAgent"]

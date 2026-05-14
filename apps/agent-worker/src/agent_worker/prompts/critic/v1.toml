@@ -1,6 +1,6 @@
 version = "1.0.0"
 agent = "critic"
-model_preference = ["deepseek-chat", "moonshot-v1-32k"]
+model_preference = ["gpt-5.5", "gpt-5.4"]
 token_budget_in = 24000
 token_budget_out = 4000
 temperature = 0.1

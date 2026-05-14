@@ -33,6 +33,32 @@ import orjson
 
 _log = logging.getLogger(__name__)
 
+
+class _DropMcpJsonrpcParseNoise(logging.Filter):
+    """Suppress the open-webSearch subprocess's status-print noise.
+
+    The CLI writes plain text like "🔍 Searching Juejin..." / "✅ Juejin
+    search completed, found 20 results" directly to stdout, which the
+    MCP SDK then tries to JSON-RPC-parse and logs as ``logger.exception``
+    with a full Pydantic stack trace. We can't fix the CLI from here
+    (it's upstream), and we don't want to silence the whole
+    ``mcp.client.stdio`` logger because real subprocess deaths surface
+    through the same channel. So drop only the records whose message
+    matches the parse-failure template.
+    """
+
+    _MSG = "Failed to parse JSONRPC message from server"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage() != self._MSG
+
+
+# Install the filter once on module import. Logging filters are
+# idempotent — adding the same instance twice is harmless — and this
+# keeps the rest of the worker quiet without any explicit setup in
+# main.py / finetune_main.py.
+logging.getLogger("mcp.client.stdio").addFilter(_DropMcpJsonrpcParseNoise())
+
 # Per-engine debounce: README warns of IP bans; 1 query / engine / second is
 # the documented safe cadence.
 _ENGINE_COOLDOWN_S = 1.0

@@ -79,6 +79,18 @@ impl From<ProviderError> for AppError {
 pub trait ProviderAdapter: Send + Sync {
     fn name(&self) -> &str;
     fn supports(&self, model: &str) -> bool;
+    /// True when this provider has an auth credential available (either a
+    /// non-empty key or a local provider that doesn't need one). The
+    /// router consults this so prompts that name a model served by a
+    /// dead-key provider (e.g. `deepseek-chat` with `DEEPSEEK_API_KEY=""`)
+    /// fall through to the next configured fallback model instead of
+    /// flat-failing with a confusing 401 from the upstream.
+    ///
+    /// Default `true` to keep test fakes simple — real adapters
+    /// (openai_compat, anthropic) override.
+    fn has_credentials(&self) -> bool {
+        true
+    }
     async fn complete(&self, req: CanonicalRequest) -> Result<CanonicalResponse, ProviderError>;
     async fn stream(
         &self,

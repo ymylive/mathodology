@@ -225,6 +225,10 @@ impl ProviderAdapter for AnthropicAdapter {
         self.models.iter().any(|m| m == model)
     }
 
+    fn has_credentials(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+
     async fn complete(&self, req: CanonicalRequest) -> Result<CanonicalResponse, ProviderError> {
         let body = self.build_body(&req, false);
         let resp = self.build_request(body).send().await?;

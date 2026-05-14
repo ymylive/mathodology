@@ -36,9 +36,17 @@ impl Router {
         }
     }
 
-    /// First provider whose `supports(model)` returns true.
+    /// First provider that BOTH `supports(model)` AND `has_credentials()`.
+    /// A provider serving a model but with an empty auth key is skipped so
+    /// the router moves on to the next fallback model instead of issuing
+    /// an unauthenticated request that the upstream will reject with 401
+    /// (which the worker then surfaces as a confusing "400 Bad Request"
+    /// because client_error → AppError::BadRequest).
     pub fn resolve(&self, model: &str) -> Option<Arc<dyn ProviderAdapter>> {
-        self.providers.iter().find(|p| p.supports(model)).cloned()
+        self.providers
+            .iter()
+            .find(|p| p.supports(model) && p.has_credentials())
+            .cloned()
     }
 
     #[allow(dead_code)]
@@ -158,4 +166,100 @@ fn log_fallback(
         error = %err,
         "router falling back to next model"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    //! Regression coverage for the round-9 credentials gate.
+    //!
+    //! Before the fix the router happily resolved to a provider whose
+    //! api_key was empty, issued the request, and propagated the
+    //! upstream's confusing 401 back to the worker as a "400 Bad
+    //! Request". With `has_credentials()` wired in, dead-key providers
+    //! are skipped entirely so the request either lands on a viable
+    //! provider or reports a clean "no adapter" error.
+    use super::*;
+    use crate::llm::canonical::{CanonicalChunk, CanonicalRequest, CanonicalResponse};
+    use crate::llm::providers::{ProviderAdapter, ProviderError};
+    use async_trait::async_trait;
+    use futures::stream::BoxStream;
+
+    struct StubAdapter {
+        name: String,
+        models: Vec<String>,
+        creds: bool,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for StubAdapter {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn supports(&self, m: &str) -> bool {
+            self.models.iter().any(|s| s == m)
+        }
+        fn has_credentials(&self) -> bool {
+            self.creds
+        }
+        async fn complete(&self, _: CanonicalRequest) -> Result<CanonicalResponse, ProviderError> {
+            unreachable!("complete() not exercised in resolve()-only tests")
+        }
+        async fn stream(
+            &self,
+            _: CanonicalRequest,
+        ) -> Result<BoxStream<'static, Result<CanonicalChunk, ProviderError>>, ProviderError>
+        {
+            unreachable!("stream() not exercised in resolve()-only tests")
+        }
+    }
+
+    fn router_with(providers: Vec<Arc<dyn ProviderAdapter>>) -> Router {
+        Router::new(providers, "gpt-5.5".to_string(), vec!["gpt-5.4".to_string()])
+    }
+
+    #[test]
+    fn resolve_skips_dead_key_provider() {
+        // Two providers both serve "deepseek-chat", the first has no
+        // credentials. Without the gate the router would pick the first
+        // and request would 401. With the gate it picks the second.
+        let dead = Arc::new(StubAdapter {
+            name: "dead".into(),
+            models: vec!["deepseek-chat".into()],
+            creds: false,
+        });
+        let alive = Arc::new(StubAdapter {
+            name: "alive".into(),
+            models: vec!["deepseek-chat".into()],
+            creds: true,
+        });
+        let r = router_with(vec![dead, alive]);
+        let chosen = r.resolve("deepseek-chat").expect("expected adapter");
+        assert_eq!(chosen.name(), "alive");
+    }
+
+    #[test]
+    fn resolve_returns_none_when_only_dead_key_provider_supports_model() {
+        // If the ONLY provider supporting a model has empty credentials,
+        // resolve must return None so stream_with_fallback moves on to
+        // the next model in the chain (round-9 behaviour). Prior to the
+        // fix it returned Some(dead), guaranteeing a 401.
+        let dead = Arc::new(StubAdapter {
+            name: "dead".into(),
+            models: vec!["claude-opus".into()],
+            creds: false,
+        });
+        let r = router_with(vec![dead]);
+        assert!(r.resolve("claude-opus").is_none());
+    }
+
+    #[test]
+    fn resolve_still_returns_alive_provider() {
+        let alive = Arc::new(StubAdapter {
+            name: "alive".into(),
+            models: vec!["gpt-5.5".into()],
+            creds: true,
+        });
+        let r = router_with(vec![alive]);
+        assert!(r.resolve("gpt-5.5").is_some());
+    }
 }

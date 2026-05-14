@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from typing import Any
 
 import httpx
@@ -26,11 +27,61 @@ CROSSREF_API_URL = "https://api.crossref.org/works"
 
 _DEFAULT_USER_AGENT = "mathodology/1.0"
 
+# Crossref rate-limits aggressive callers from the public pool with 429.
+# The Searcher fan-out (4 queries × 4 sources in parallel) reliably trips
+# this. Mirror arxiv.py's retry pattern so we don't drop scholarly hits on
+# a transient rate-limit blip.
+_RETRY_STATUS = {429, 503}
+_TRANSIENT_EXC = (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError)
+_MAX_RETRIES = 3
+_BASE_DELAY = 1.0  # seconds; multiplied 2^attempt
+
 
 def _user_agent(mailto: str | None) -> str:
     if mailto:
         return f"{_DEFAULT_USER_AGENT} (mailto:{mailto})"
     return _DEFAULT_USER_AGENT
+
+
+async def _get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    params: dict[str, Any],
+    headers: dict[str, str],
+) -> httpx.Response:
+    """GET with exponential backoff for 429 / 503 / transient network errors.
+
+    Up to ``_MAX_RETRIES`` retries with delays 1s, 2s, 4s (±30% jitter).
+    Non-transient client errors (400, 401, 4xx other than 429) propagate
+    immediately so the caller's swallow logic surfaces them as empty.
+    """
+    delay = _BASE_DELAY
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            r = await client.get(url, params=params, headers=headers)
+            if r.status_code in _RETRY_STATUS and attempt < _MAX_RETRIES:
+                jitter = delay * (0.7 + random.random() * 0.6)
+                _log.info(
+                    "Crossref %d on %r; retrying in %.2fs (attempt %d/%d)",
+                    r.status_code, params.get("query"), jitter,
+                    attempt + 1, _MAX_RETRIES,
+                )
+                await asyncio.sleep(jitter)
+                delay *= 2
+                continue
+            r.raise_for_status()
+            return r
+        except _TRANSIENT_EXC as e:
+            if attempt >= _MAX_RETRIES:
+                raise
+            jitter = delay * (0.7 + random.random() * 0.6)
+            _log.info(
+                "Crossref transient %r; retrying in %.2fs (attempt %d/%d)",
+                e, jitter, attempt + 1, _MAX_RETRIES,
+            )
+            await asyncio.sleep(jitter)
+            delay *= 2
+    raise RuntimeError("retry loop fell through")
 
 
 async def search_crossref(
@@ -62,8 +113,7 @@ async def search_crossref(
         client = httpx.AsyncClient(timeout=timeout)
     try:
         assert client is not None
-        r = await client.get(CROSSREF_API_URL, params=params, headers=headers)
-        r.raise_for_status()
+        r = await _get_with_retry(client, CROSSREF_API_URL, params, headers)
         data = r.json()
         return _parse_works(data)
     finally:

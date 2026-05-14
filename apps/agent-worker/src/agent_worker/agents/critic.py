@@ -68,7 +68,7 @@ class CriticAgent(BaseAgent):
         gateway: GatewayClient,
         emitter: EventEmitter,
         prompt_version: str = "v1",
-        run_effort: ReasoningEffort = "medium",
+        run_effort: ReasoningEffort = "high",
         long_context: bool = False,
         model_override: str | None = None,
     ) -> None:

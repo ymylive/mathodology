@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -12,6 +13,22 @@ from redis.asyncio import Redis
 
 EVENTS_MAXLEN = 5000
 
+# Event kinds persisted to disk for post-mortem. Token events are deliberately
+# excluded — they dominate volume (~100k+ per run on long generations) and add
+# no forensic value vs the aggregated cost / agent.output events.
+_PERSISTED_KINDS: frozenset[str] = frozenset(
+    {
+        "stage.start",
+        "stage.done",
+        "agent.output",
+        "error",
+        "log",
+        "cost",
+        "done",
+        "kernel.figure",
+    }
+)
+
 
 class EventEmitter:
     """Per-run event emitter.
@@ -20,14 +37,25 @@ class EventEmitter:
     INCR, which is the single source of truth shared with the Rust gateway's
     token/cost fan-out. The in-memory `_seq` attribute caches the last value
     we received for logging only.
+
+    When `events_log_path` is set, non-token events are also appended to a
+    JSONL file. Redis stream capping (MAXLEN=5000) drops ~96% of events on
+    long generations, so the JSONL is the forensic source of truth; the
+    Redis stream is for live WS replay only.
     """
 
-    def __init__(self, redis: Redis, run_id: UUID) -> None:
+    def __init__(
+        self,
+        redis: Redis,
+        run_id: UUID,
+        events_log_path: Path | None = None,
+    ) -> None:
         self._redis = redis
         self._run_id = run_id
         self._stream_key = f"mm:events:{run_id}"
         self._seq_key = f"mm:seq:{run_id}"
         self._seq = 0
+        self._events_log_path = events_log_path
 
     @property
     def run_id(self) -> UUID:
@@ -53,7 +81,17 @@ class EventEmitter:
             ts=datetime.now(UTC),
             payload=payload or {},
         )
-        body = orjson.dumps(event.model_dump(mode="json")).decode("utf-8")
+        dumped = event.model_dump(mode="json")
+        body = orjson.dumps(dumped).decode("utf-8")
+        # Persist forensic events to disk before the Redis stream MAXLEN
+        # rolls them off. Failures here must NOT block the live stream.
+        if self._events_log_path is not None and kind in _PERSISTED_KINDS:
+            try:
+                with self._events_log_path.open("ab") as f:  # noqa: ASYNC230
+                    f.write(orjson.dumps(dumped))
+                    f.write(b"\n")
+            except OSError:
+                pass
         return await self._redis.xadd(
             self._stream_key,
             {"payload": body},

@@ -299,15 +299,32 @@ async fn render_tex(
     // For each section: substitute [[FIG:id]] placeholders with raw-LaTeX
     // blocks (via pandoc's `raw_attribute` extension), then shell out to
     // pandoc to convert the substituted markdown to LaTeX.
+    //
+    // We also pandoc-render the section TITLE so inline math like
+    // "§8.2 Focused $\pm10\%$ ..." survives the journey. Title pandoc
+    // output is wrapped in `\hypertarget{}{...}` etc, which is unwanted
+    // inside `\section{...}`; we strip those wrappers below.
     let mut rendered_sections: Vec<serde_json::Value> = Vec::with_capacity(meta.sections.len());
     for sec in &meta.sections {
         let substituted = substitute_figures(&sec.body_markdown, &figure_map);
         let body_latex = md_to_latex(&substituted).await?;
+        let title_latex = md_inline_to_latex(&sec.title).await?;
         rendered_sections.push(serde_json::json!({
             "title": sec.title,
+            "title_latex": title_latex,
             "body_latex": body_latex,
         }));
     }
+
+    // Abstract often contains inline math ($K_R$, $\pm10\%$, etc.). Going
+    // through `latex_escape` would mangle every `$` to `\$` and `_` to `\_`,
+    // making the rendered PDF show literal LaTeX source. Run it through
+    // pandoc so math survives.
+    let abstract_latex = if meta.r#abstract.trim().is_empty() {
+        String::new()
+    } else {
+        md_to_latex(&meta.r#abstract).await?
+    };
 
     // Figures are saved by the worker at paths relative to run_root (e.g.
     // `figures/foo.png`). Tectonic compiles in a tmpdir, so we inject an
@@ -320,7 +337,10 @@ async fn render_tex(
 
     let mut ctx = tera::Context::new();
     ctx.insert("title", &meta.title);
+    // Keep the raw abstract for backward compat; templates should prefer
+    // `abstract_latex` (pandoc'd) to preserve inline math.
     ctx.insert("abstract", &meta.r#abstract);
+    ctx.insert("abstract_latex", &abstract_latex);
     ctx.insert("problem_text", &meta.problem_text);
     ctx.insert("sections", &rendered_sections);
     ctx.insert("references", &meta.references);
@@ -415,6 +435,83 @@ async fn md_to_latex(md: &str) -> Result<String, AppError> {
     )
     .await?;
     String::from_utf8(out).map_err(|e| AppError::Internal(format!("pandoc output not utf-8: {e}")))
+}
+
+/// Pandoc-convert a single-line inline string (e.g. a section title) and
+/// strip wrappers that pandoc adds for block context but that are illegal
+/// inside `\section{...}` / `\subsection{...}` arguments.
+///
+/// Returns the inline-safe LaTeX. Falls back to `latex_escape` when pandoc
+/// fails so a single weird title can't tank the whole render.
+async fn md_inline_to_latex(md: &str) -> Result<String, AppError> {
+    let trimmed = md.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    match md_to_latex(trimmed).await {
+        Ok(out) => Ok(strip_block_wrappers(&out)),
+        Err(_) => Ok(latex_escape(trimmed)),
+    }
+}
+
+/// Remove pandoc-added block context that can't live inside section args:
+/// trailing newlines, leading/trailing `\hypertarget{...}{...}` / `\label{}` /
+/// `\section{}` lines. We keep the inner inline text untouched.
+fn strip_block_wrappers(s: &str) -> String {
+    let trimmed = s.trim();
+    // If pandoc emitted a real `\section{...}` block (because input had a
+    // `#` heading), unwrap one level.
+    for prefix in [
+        "\\section",
+        "\\subsection",
+        "\\subsubsection",
+        "\\paragraph",
+        "\\subparagraph",
+    ] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            if let Some(inner) = rest.strip_prefix('{') {
+                if let Some(end) = matching_brace_end(inner) {
+                    return inner[..end].to_string();
+                }
+            }
+        }
+    }
+    // Strip a leading `\hypertarget{...}{` wrapper if present and find its
+    // matching close brace; otherwise pass through.
+    if let Some(after) = trimmed.strip_prefix("\\hypertarget{") {
+        if let Some(target_end) = after.find('}') {
+            let after_target = &after[target_end + 1..];
+            if let Some(inner) = after_target.strip_prefix('{') {
+                if let Some(end) = matching_brace_end(inner) {
+                    return inner[..end].to_string();
+                }
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+fn matching_brace_end(s: &str) -> Option<usize> {
+    let mut depth: i32 = 1;
+    let mut escaped = false;
+    for (i, ch) in s.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 async fn compile_pdf(tex: &str) -> Result<Vec<u8>, AppError> {

@@ -62,6 +62,7 @@ from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.hmml import HMMLService
 from agent_worker.kernel import KernelSession
+from agent_worker.matlab import MatlabSession
 
 _log = logging.getLogger(__name__)
 
@@ -181,11 +182,22 @@ async def _review_and_maybe_revise(
         if loop_cost_rmb + revision_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
             break
-        current = await producer.revise_with_critique(
-            original_output=current,
-            critique=report,
-            context=context,
-        )
+        try:
+            current = await producer.revise_with_critique(
+                original_output=current,
+                critique=report,
+                context=context,
+            )
+        except AgentError as exc:
+            # Revision call failed (transient network / parse). Don't sink the
+            # whole run — keep the last valid `current` and abandon revision.
+            _log.warning(
+                "revise_with_critique for %s failed at round %d; keeping prior output: %s",
+                target_agent,
+                revision_round,
+                exc,
+            )
+            break
         loop_cost_rmb += revision_cost_rmb
         if loop_cost_rmb + review_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
@@ -259,12 +271,23 @@ async def _review_and_maybe_rerun_coder(
             original_output=current,
             critique=report,
         )
-        current = await coder.run(
-            revision_problem,
-            analysis,
-            spec,
-            max_iterations=policy.coder_revision_iterations,
-        )
+        try:
+            current = await coder.run(
+                revision_problem,
+                analysis,
+                spec,
+                max_iterations=policy.coder_revision_iterations,
+            )
+        except AgentError as exc:
+            # Coder rerun crashed (often upstream LLM disconnect). The prior
+            # `current` already contains a notebook + figures, so it's strictly
+            # better to ship that than to fail the whole run.
+            _log.warning(
+                "coder rerun round %d failed; keeping prior CoderOutput: %s",
+                revision_round,
+                exc,
+            )
+            break
         loop_cost_rmb += policy.estimated_coder_revision_cost_rmb
         if (
             loop_cost_rmb + policy.estimated_review_cost_rmb
@@ -293,13 +316,20 @@ async def _review_and_maybe_rerun_coder(
 async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> None:
     """Run the full 4-agent pipeline. Emit terminal `done` with paths + status."""
     settings = get_settings()
-    emitter = EventEmitter(redis, run_id)
     runs_dir = Path(settings.runs_dir).resolve()  # noqa: ASYNC240 — stdlib asyncio, not trio
     run_dir = runs_dir / str(run_id)
     run_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+    # Persist forensic events to disk; Redis stream MAXLEN=5000 rolls off the
+    # rest. events.jsonl lets us reconstruct the full timeline post-failure.
+    emitter = EventEmitter(redis, run_id, events_log_path=run_dir / "events.jsonl")
 
     gateway = GatewayClient(settings.gateway_http, settings.dev_auth_token)
     kernel = KernelSession(run_id, runs_dir)
+    # MatlabSession is created upfront so backend detection runs once per run.
+    # Detection is cheap (shutil.which); the backend may still be NoOp if
+    # neither matlab nor octave is installed — that's surfaced as an error
+    # cell when the Coder picks language='matlab' rather than crashing the run.
+    matlab_session = MatlabSession(run_id, runs_dir)
     hmml = _get_hmml()
 
     try:
@@ -370,7 +400,9 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             )
             assert isinstance(spec, ModelSpec)
 
-            coder = CoderAgent(gateway, emitter, kernel, **kwargs)
+            coder = CoderAgent(
+                gateway, emitter, kernel, matlab_session=matlab_session, **kwargs
+            )
             coder_out = await coder.run(problem, analysis, spec)
             coder_out = await _review_and_maybe_rerun_coder(
                 critic=critic,
@@ -470,24 +502,116 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 encoding="utf-8",
             )  # noqa: ASYNC240
 
+            # Auto-export PDF via gateway (tectonic + pandoc). Failure here
+            # is non-fatal: paper.md stays the source of truth. The PDF path
+            # is included in `done` only on success.
+            pdf_path = await _auto_export_pdf(
+                gateway=gateway,
+                run_id=run_id,
+                run_dir=run_dir,
+                settings=settings,
+                emitter=emitter,
+            )
+
             # Do NOT include `cost_rmb` here: the gateway's cost.rs already
             # maintains runs.cost_rmb authoritatively from per-call cost events.
             # Setting cost_rmb=0 in the done payload would cause the audit task
             # to overwrite the correct accumulated total with zero.
+            done_payload: dict[str, Any] = {
+                "status": "success",
+                "notebook_path": coder_out.notebook_path,
+                "paper_path": str(paper_path),
+                "meta_path": str(meta_path),
+            }
+            if pdf_path is not None:
+                done_payload["pdf_path"] = str(pdf_path)
+            await emitter.emit("done", done_payload, agent=None)
+        except AgentError as exc:
+            # Surface the real reason before declaring failure. Without this
+            # the run terminates silently and forensics requires hand-walking
+            # the Redis stream and DB.
+            _log.exception("pipeline failed: %s", exc)
             await emitter.emit(
-                "done",
+                "error",
                 {
-                    "status": "success",
-                    "notebook_path": coder_out.notebook_path,
-                    "paper_path": str(paper_path),
-                    "meta_path": str(meta_path),
+                    "message": str(exc),
+                    "code": "agent_error",
+                    "stage": None,
                 },
                 agent=None,
             )
-        except AgentError:
             await emitter.emit("done", {"status": "failed"}, agent=None)
     finally:
         await gateway.close()
+
+
+async def _auto_export_pdf(
+    *,
+    gateway: GatewayClient,
+    run_id: UUID,
+    run_dir: Path,
+    settings: Any,
+    emitter: EventEmitter,
+) -> Path | None:
+    """Trigger the gateway export endpoint and persist paper.pdf in run_dir.
+
+    Returns the absolute Path on success, None on any failure. Always
+    non-fatal: emits a `log` event with the reason so users can diagnose.
+    Disabled via `MM_AUTO_EXPORT_PDF=0`.
+    """
+    if not getattr(settings, "auto_export_pdf", True):
+        return None
+    import httpx
+
+    pdf_path = run_dir / "paper.pdf"
+    try:
+        await emitter.emit(
+            "log",
+            {
+                "level": "info",
+                "message": "auto-exporting paper.pdf via gateway/export/pdf",
+            },
+            agent=None,
+        )
+        pdf_bytes = await gateway.export_paper(
+            run_id=run_id,
+            format="pdf",
+            compile_timeout_s=getattr(settings, "auto_export_timeout_s", 600.0),
+        )
+        if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
+            await emitter.emit(
+                "log",
+                {
+                    "level": "warning",
+                    "message": (
+                        "auto-export returned non-PDF payload "
+                        f"({len(pdf_bytes)} bytes); paper.md remains canonical"
+                    ),
+                },
+                agent=None,
+            )
+            return None
+        pdf_path.write_bytes(pdf_bytes)  # noqa: ASYNC240
+        await emitter.emit(
+            "log",
+            {
+                "level": "info",
+                "message": f"paper.pdf written ({len(pdf_bytes)} bytes)",
+            },
+            agent=None,
+        )
+        return pdf_path
+    except (httpx.HTTPError, OSError) as exc:  # noqa: BLE001 — narrow set
+        _log.warning("auto-export PDF failed: %s", exc)
+        await emitter.emit(
+            "log",
+            {
+                "level": "warning",
+                "message": f"auto-export PDF failed: {exc}; paper.md remains canonical",
+            },
+            agent=None,
+        )
+        return None
 
 
 _FIG_PLACEHOLDER_RE = re.compile(r"\[\[FIG:([a-z0-9_]+)\]\]")
@@ -517,7 +641,11 @@ def _substitute_figure_placeholders(
             return ""
         # Blank lines around the image so the markdown renderer always treats
         # it as a block, regardless of the surrounding paragraph.
-        return f"\n\n![{fig.caption}]({fig.path_png})\n\n*图: {fig.caption}*\n\n"
+        # Markdown rendering uses native `![]()` syntax. We deliberately do
+        # NOT emit a second `*图: ...*` line — that bilingual prefix leaked
+        # into the rendered PDF as raw text (judges noticed). The image
+        # `alt` text + the Writer's own surrounding prose carry the caption.
+        return f"\n\n![{fig.caption}]({fig.path_png})\n\n"
 
     new_sections = [
         type(s)(

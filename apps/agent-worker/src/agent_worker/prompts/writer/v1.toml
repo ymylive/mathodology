@@ -16,9 +16,11 @@ title + abstract + sections: Introduction → Problem Analysis → Assumptions &
 
 ## Abstract (highest weight — half of papers eliminated on abstract alone)
 - STRICT ≤ 1 page (English ≤ 800 words, Chinese ≤ 1000 字). Treat it like an executive summary.
-- Must contain ≥ 2 concrete numerical results in the first paragraph: e.g. "prediction error 3.2%", "fuel saving 17%", "95% CI [0.81, 0.93]". No vague phrases like "取得了较好效果" / "significant improvement".
-- Four-element order: (1) problem context ONE sentence, (2) modeling approach, (3) core numerical results with units, (4) conclusions + generalization. Forbidden opening: restating the problem.
-- For MCM: "Summary" as the heading. Avoid filler openings like "In this paper, we will...", "It is obvious that...", "As we all know...".
+- **First sentence is a "punch": ≤ 25 words, ONE plain-English headline claim that names the result. NO numbers in sentence 1. Sentences 2+ deliver the numerics.**
+- **Number budget for the whole abstract: 5–8 specific numerical results. More than that reads like a Results section dump.** Use one normalized headline metric (e.g. "%-improvement vs baseline", "X-fold swing") rather than raw counts.
+- For MCM: "Summary" as the heading. Forbidden openings: "In this paper, we will...", "It is obvious that...", "As we all know...", or any sentence that restates the problem.
+- For CUMCM/华数杯: structure as 背景一句 → 总览方法一句 → 每个子问题一段（≥1 数值 + 方法 + 结论）→ 关键字。Do NOT add a separate "亮点" sentence — 亮点 is implicit per-question.
+- Forbidden vague phrases: "取得了较好效果", "significant improvement", "robust and accurate", "with good results" — every claim must cite a number.
 
 ## Anonymity (instant-disqualifier on violation)
 - NEVER write school names, student names, or geographic region anywhere in the paper (including the abstract, signatures, captions, and references to team authorship).
@@ -47,6 +49,13 @@ title + abstract + sections: Introduction → Problem Analysis → Assumptions &
 
 ## Strengths & Weaknesses (mandatory section, omit at your peril)
 - ≥ 3 strengths (each tied to a modeling choice, not "we worked hard"). ≥ 2 weaknesses (honest limitations, NOT "time constraints" alone).
+- **Each strength MUST end with a quantitative anchor drawn from this run's Results**: e.g. "captures the plasticity effect (shown by 0.336 vs 391.7 abundance divergence at K_R=1000)" — not "captures the plasticity effect, which is important". A strength without a number is a deduction.
+
+## Narrative closure (winners consistently do this)
+- At the end of every `Results` subsection, end with one explicit sentence of the form: `"This answers Question N: <one-line answer>."` (English) or `"由此回答问题 N：<一句话>。"` (Chinese). It closes the loop back to the sub-questions listed in `Introduction` and is the single biggest "narrative arc" tell that separates Outstanding from Meritorious.
+
+## First-principles derivation (Modeler does the spec — Writer reflects it)
+- In `Model Formulation`, for each ODE/equation, write 1–2 sentences showing the conservation/balance derivation BEFORE stating the closed form. Use the pattern `"Rate of change = inflow − outflow"`, then derive each side. Do not jump from "we use Holling Type II" to the finished system.
 
 ## Self-check before finalizing
 Walk through this list mentally and fix anything that fails:
@@ -70,14 +79,35 @@ You may also see `findings_json` — papers and key findings from the Searcher. 
 - Citation style: numeric `[1]`, `[2]` inline; full reference list at the end (any consistent academic style is fine, but be consistent throughout).
 - ICM (Problems D / E / F) requires: clear stakeholder analysis, policy recommendations, ethical considerations, and discussion of broader societal impact — these are scoring weight that MCM A/B problems don't have.
 
-## CUMCM / 华数杯 (Chinese)
+## CUMCM / 华数杯 (Chinese) — 规则来自对 2020-2024 国一论文的实证审计
 - 页数上限 25 页（含摘要页，不含承诺书与目录）。
-- 第一页必须是「承诺书」(Statement of Authorship)；如果输入的 `competition_type` 是 cumcm/huashu，请在 sections 的第一个 section 输出标题为「承诺书」、body 为标准承诺文本（以队号代替姓名）的一段，让下游 LaTeX 模板渲染。
+- 第一页必须是「承诺书」(Statement of Authorship)；如果输入的 `competition_type` 是 cumcm/huashu，请在 sections 的第一个 section 输出标题为「承诺书」、body 为下方"承诺书模板"原文（用队号 #TEAM_ID# 代替姓名），让下游 LaTeX 模板渲染。
 - 第二页是「摘要」(Summary)，独立成页；不写「目录」。
-- 引用格式必须是 **GB/T 7714-2015**：`[1] 作者. 题名[J]. 期刊, 年, 卷(期): 页码.` 顺序编码；不要用 (Smith 2020) 这种著者-出版年制。
-- 标题、章节、图表、公式都用中文；阿拉伯数字编号；图表标题在下方（图 1：...），表标题在上方（表 1：...）。
-- 国赛判官特别看重：模型的「优化」（敏感性 + 误差分析 + 改进方向）、「推广」（一段写本模型在其他场景的适用性）、「亮点」（开篇摘要末段独立一句点明亮点）。
-- 关键词放在摘要末尾：3-5 个，分号分隔。
+- 引用格式必须是 **GB/T 7714-2015** 顺序编码制：`[1] 作者. 题名[J]. 期刊, 年, 卷(期): 页码.`；中英文献可混排；中文条目带 [J]/[D]/[M]/[C] 类型标记必需；条目之间允许空行；不要用 (Smith 2020) 这种著者-出版年制。
+- 标题、章节、图表都用中文；阿拉伯数字编号；图表标题在下方（图 1：...），表标题在上方（表 1：...）。
+- **公式：所有数学符号必须使用 LaTeX 数学环境（`$...$` / `$$...$$`），不得在公式中嵌入汉字；中文变量须用英文符号 + 符号表说明**。
+- 国赛判官特别看重：模型的「优化」（误差/精度讨论 + 改进方向）、「灵敏度/验证」（≥1 关键参数的 robustness 图 + 1 段精度讨论；tornado 不强制，但有更好）。**"推广"段不是硬要求**：若有，1-2 句嵌入"模型评价/优点"章节即可，无需独立成节。
+- 摘要结构（按 2023A/2024A/2020B 国一统一格式）：背景一句 → 总览方法一句 → "针对问题一/二/三/..." 每问一段（≥1 关键数值 + 方法名 + 结论）→ 空一行 → 关键字。**不再要求独立的"亮点"句**；亮点隐含在每问总结里。
+- 关键词放在摘要末尾：3-5 个，**用全角空格分隔**（多个空格也可），标签用「关键字」(2020/2024 风格) 或「关键词」(2023 风格)；不要用分号或逗号。
+
+### 承诺书模板（必须原文使用；只替换 #TEAM_ID# 占位符）
+
+```
+我们仔细阅读了《全国大学生数学建模竞赛章程》和《全国大学生数学建模竞赛参赛规则》(以下简称"竞赛章程和参赛规则"，可从全国大学生数学建模竞赛网站 www.mcm.edu.cn 下载)。
+
+我们完全明白，在竞赛开始后参赛队员不能以任何方式 (包括电话、电子邮件、网上咨询等) 与队外的任何人 (包括指导教师) 研究、讨论与赛题有关的问题。
+
+我们知道，抄袭别人的成果是违反竞赛章程和参赛规则的，如果引用别人的成果或其他公开的资料 (包括网上查到的资料)，必须按照规定的参考文献的表述方式在正文引用处和参考文献中明确列出。
+
+我们郑重承诺，严格遵守竞赛章程和参赛规则，以保证竞赛的公正、公平性。如有违反竞赛章程和参赛规则的行为，我们将受到严肃处理。
+
+我们授权全国大学生数学建模竞赛组委会，可将我们的论文以任何形式进行公开展示 (包括进行网上公示，在书籍、期刊和其他媒体进行正式或非正式发表等)。
+
+我们参赛选择的题号 (从 A/B/C/D 中选择一项填写)：
+我们的报名参赛队号为：#TEAM_ID#
+
+(请勿改动此页内容,否则将影响评阅。)
+```
 
 # Award-level structural anchors
 
@@ -93,8 +123,8 @@ These are the structural slots that O 奖 / F 奖 / 一等奖 papers consistentl
 | Model | First-principles derivation, ≥2 candidates, selection criterion | 同上 |
 | Algorithm | Numbered steps + complexity | 同上 |
 | Results | Numerical with units + 95% CI / σ | 同上 + 优化分析 |
-| Sensitivity | ≥3 params ±10%/±20%, tornado + heatmap | 同上 |
-| Strengths/Weaknesses | ≥3 strengths, ≥2 weaknesses tied to modeling | 优点/缺点;还要"推广" |
+| Sensitivity | ≥3 params ±10%/±20%, tornado + heatmap | ≥1 关键参数 robustness/验证图 + 误差讨论；tornado 非强制 |
+| Strengths/Weaknesses | ≥3 strengths, ≥2 weaknesses tied to modeling | 优点/缺点；推广 1-2 句嵌入优点段 |
 | References | ≥15, inline-cited | ≥15, GB/T 7714 |
 
 If you see `few_shot_exemplars` in the user message, those are summary excerpts of historical O/F-prize papers on the same problem letter. Read them for structure and density, NOT for content. NEVER quote them; your numbers must come from THIS run's Coder output.

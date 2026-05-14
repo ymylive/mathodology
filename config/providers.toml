@@ -3,7 +3,7 @@ name = "cornna"
 kind = "openai_compat"
 base_url = "https://cdnapi.cornna.xyz/v1"
 api_key_env = "CORNNA_API_KEY"
-models = ["gpt-5.4"]
+models = ["gpt-5.4", "gpt-5.5"]
 price_input_per_1m = 5.0
 price_output_per_1m = 15.0
 
@@ -57,5 +57,9 @@ price_input_per_1m = 0.0
 price_output_per_1m = 0.0
 
 [router]
-default_model = "deepseek-chat"
-fallback = ["deepseek-chat", "moonshot-v1-32k"]
+# Only cornna has a real API key in this environment. Including dead-key
+# providers (deepseek/moonshot) here turns transient cornna timeouts into
+# 10-15s wasted fallback attempts that always fail. Keep the chain to live
+# providers only.
+default_model = "gpt-5.5"
+fallback = ["gpt-5.5", "gpt-5.4"]

@@ -33,6 +33,7 @@ from agent_worker.chart_catalog import render_index_markdown
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.kernel import KernelSession
+from agent_worker.matlab import MatlabSession
 from agent_worker.prompts import load_prompt
 
 # Iteration budget for the Coder loop. Originally 3 (MVP), bumped to 7 so the
@@ -66,6 +67,12 @@ class CoderDirective(BaseModel):
     # these IDs and only verifies the PNG exists on disk; missing files are
     # dropped with a warning so one bad savefig doesn't kill the run.
     figures_saved: list[FigureMeta] = Field(default_factory=list)
+    # Which backend to route this turn's code to. "python" (default) executes
+    # in the persistent Jupyter kernel; "matlab" hands the source to
+    # MatlabSession (matlab -batch in prod, octave --no-gui in dev). State
+    # does NOT persist across MATLAB turns — use .mat files for handoff.
+    # Unknown values are normalized to "python" by the agent.
+    language: str = "python"
 
 
 class CoderAgent:
@@ -80,13 +87,17 @@ class CoderAgent:
         emitter: EventEmitter,
         kernel: KernelSession,
         prompt_version: str = "v1",
-        run_effort: ReasoningEffort = "medium",
+        run_effort: ReasoningEffort = "high",
         long_context: bool = False,
         model_override: str | None = None,
+        matlab_session: MatlabSession | None = None,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
         self.kernel = kernel
+        # Optional MATLAB backend. None → directive.language='matlab' degrades
+        # to an error-typed CellExecution so the model can recover next turn.
+        self.matlab_session = matlab_session
         self.prompt = load_prompt(self.AGENT_NAME, prompt_version)
         self._run_effort: ReasoningEffort = run_effort
         self._long_context: bool = long_context
@@ -140,14 +151,38 @@ class CoderAgent:
             for i in range(max_iterations):
                 directive = await self._ask_llm(model, messages)
 
+                lang = (directive.language or "python").lower()
+                if lang not in ("python", "matlab"):
+                    lang = "python"
                 await self.emitter.emit(
                     "log",
-                    {"level": "info", "message": f"executing cell {i}"},
+                    {
+                        "level": "info",
+                        "message": f"executing cell {i} [{lang}]",
+                    },
                     agent=self.AGENT_NAME,
                 )
-                cell = await self.kernel.execute(
-                    directive.code, cell_index=i, emitter=self.emitter
-                )
+                if lang == "matlab":
+                    if self.matlab_session is None:
+                        cell = CellExecution(
+                            index=i,
+                            source=directive.code,
+                            language="matlab",
+                            error=(
+                                "MATLAB backend not provisioned for this run; "
+                                "switch to language='python' or install MATLAB/Octave."
+                            ),
+                        )
+                    else:
+                        cell = await self.matlab_session.execute(
+                            directive.code, cell_index=i, emitter=self.emitter
+                        )
+                        cell.language = "matlab"
+                else:
+                    cell = await self.kernel.execute(
+                        directive.code, cell_index=i, emitter=self.emitter
+                    )
+                    cell.language = "python"
                 cells.append(cell)
                 # Register figures the LLM claims to have saved, guarded by
                 # on-disk existence: LLMs occasionally hallucinate a savefig.
@@ -157,6 +192,8 @@ class CoderAgent:
                         continue
                     png_rel = f"figures/{fm.id}.png"
                     svg_rel = f"figures/{fm.id}.svg"
+                    # Both backends share the same run_dir/figures/ tree, so
+                    # this lookup is correct regardless of which one wrote it.
                     png_abs = self.kernel.run_dir / png_rel
                     if not png_abs.is_file():
                         await self.emitter.emit(

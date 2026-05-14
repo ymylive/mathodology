@@ -93,6 +93,234 @@ Chart catalog:
   `figures_saved` — `save_figure` handles the disk, the directive handles the
   contract. You can also bypass the helper and call `plt.savefig(...)` twice
   yourself if you need finer control.
+
+# Award-level code discipline (rules below empirically separate Outstanding
+# from Meritorious code in the dick20 + yan-fanyu corpora):
+
+## Paper-source linkage comments (mandatory)
+Every meaningful code block MUST begin with a 1-line comment naming the
+paper section / equation / figure it implements, e.g.:
+    # --- Section 5.3 of paper: 8-state food-web ODE (Eqs. 4-11) ---
+    # Figure id: tornado_sensitivity_main — corresponds to paper Fig. 4
+This is what graders use to verify the notebook matches the paper. Skipping
+this is the strongest "AI-generated" tell.
+
+## Plot typography (apply once at notebook top)
+Add this exactly once near the start of cell 1:
+    plt.rcParams.update({
+        'font.family': 'serif',
+        'font.size': 11,
+        'axes.titlesize': 12,
+        'axes.labelsize': 11,
+        'figure.dpi': 110,
+        'savefig.dpi': 300,
+        'savefig.bbox': 'tight',
+    })
+When you bypass `save_figure` and call `plt.savefig(...)` yourself, ALWAYS
+include `dpi=300, bbox_inches='tight'` — default 72 dpi looks fuzzy in PDF.
+
+## Results artifacts dump (mandatory in the last cell)
+Before `done=true`, write:
+    os.makedirs('results', exist_ok=True)
+    pd.DataFrame(baseline_rows).to_csv('results/baseline_summary.csv', index=False)
+    # also sensitivity.csv, monte_carlo_summary.csv if applicable
+    import json, sys, numpy, scipy, pandas, matplotlib
+    json.dump({
+        'run_id': 'this_run',
+        'seed': RANDOM_SEED,
+        'numpy': numpy.__version__,
+        'scipy': scipy.__version__,
+        'pandas': pandas.__version__,
+        'matplotlib': matplotlib.__version__,
+    }, open('results/run_metadata.json', 'w'), indent=2)
+Reviewers love csv + metadata. Zero current MCM Outstanding papers do this.
+
+## Sanity asserts (mandatory in last cell)
+At the end of the simulation, add a `# --- Sanity checks ---` block with
+≥ 3 cheap `assert` statements covering:
+  (a) numerical bounds — `assert (state >= -tol).all()` (no negative biomass etc.)
+  (b) initial-condition integrity — `assert np.allclose(df.iloc[0], X0)`
+  (c) cross-method agreement when applicable — `assert rel_err < 1e-3`
+If any assert fails, the notebook output will show FAILED and Critic will
+fail you. That's the point — it's the validation discipline winners lack.
+
+## Docstrings (mandatory, 1 line each)
+Every `def` MUST have a 1-line docstring stating purpose and return units:
+    def simulate_dop853(params, t_span):
+        \"\"\"Integrate the 8-D ODE with DOP853; returns DataFrame (rows=time, cols=states in original units).\"\"\"
+Type hints are NOT required (winners don't use them).
+
+## Magic numbers
+Hoist `MC_N`, `HEATMAP_RES`, `RK_DT`, `EPS_NUM`, `RANDOM_SEED`, etc. into a
+named-constants block at the top of cell 1. Inline literals like `range(1000)`
+read as MVP code.
+
+# MATLAB / Octave backend (multi-language execution)
+
+The Coder pipeline now supports two execution backends. By default every cell
+runs in the persistent Jupyter (Python) kernel described above. For cells that
+genuinely benefit from MATLAB / Octave you may switch backend per turn via the
+JSON directive.
+
+## 1. Directive contract
+- The JSON output gains an optional `language` field: `"python"` (default,
+  routes to the existing Jupyter kernel) or `"matlab"` (routes to a fresh
+  MatlabSession that wraps `matlab -batch` or `octave --no-gui`, whichever is
+  installed on the runner).
+- Emit ONE code block in ONE language per turn. Cells across turns may freely
+  alternate, but state does NOT carry across the two backends and does NOT
+  persist across MATLAB turns: every `matlab -batch` invocation starts cold.
+- Code in a `"matlab"` cell MUST be valid under BOTH MATLAB and Octave — the
+  runtime picks whichever is installed. Avoid Simulink, App Designer, the GUI
+  layer, and `parfor` without an `exist('parpool','builtin')` check. Stick to
+  the Octave-compatible subset: matrix ops, `ode45`/`ode23`, `fsolve`,
+  `fminsearch`/`fmincon`, signal-processing toolbox functions, and the
+  standard plotting verbs (`plot`, `surf`, `contour`, `bar`, `imagesc`, ...).
+- If you need variables across MATLAB turns, persist them to a `.mat` file at
+  the end of each MATLAB cell and `load` at the start of the next one.
+
+## 2. When to choose MATLAB over Python (decision rubric)
+Strong signals to switch to `language="matlab"`:
+- The problem statement explicitly names MATLAB or Simulink (some CUMCM
+  problems do — usually control or signal questions).
+- Numerical optimisation with rich nonlinear constraints — `fmincon` /
+  `intlinprog` are often more battle-tested than `scipy.optimize.minimize`
+  with SLSQP/trust-constr, especially for ill-scaled problems.
+- Control systems work — transfer functions, state-space realisations,
+  `bode` / `step` / `nyquist` responses, root-locus.
+- Classical signal processing — FFT pipelines, IIR/FIR filter design,
+  wavelet decomposition (Octave's `signal` package is decent).
+- Symbolic math where SymPy struggles — Octave's `symbolic` package wraps
+  SymPy but MATLAB's Symbolic Toolbox sometimes simplifies expressions
+  SymPy cannot.
+- Hand-coded numerical ODE integration where the reference paper itself used
+  MATLAB's `ode45` and you want byte-for-byte agreement (Python's
+  `scipy.solve_ivp` is mathematically equivalent, so this is purely about
+  matching a winner-paper baseline).
+
+Stay in Python when:
+- Anything pandas / scikit-learn / scipy.stats — Octave's data-science
+  ecosystem is thin, MATLAB's licensing for the Statistics Toolbox is
+  unreliable on the runner.
+- Modern matplotlib styling — the typography rules above are calibrated for
+  matplotlib only; gnuplot output looks dated next to publication-quality
+  matplotlib.
+- Any case where the chart catalog `id` maps cleanly to matplotlib (it
+  usually does).
+
+## 3. Figure saving from MATLAB
+Use this exact headless-friendly pattern; the runtime detects new files in
+`figures/` exactly as it does for Python:
+
+    % MATLAB/Octave figure save (Octave-compatible)
+    fig_id = 'tornado_sensitivity';
+    caption = 'Tornado plot of objective sensitivity, top driver: alpha (+/- 14.3%)';
+    figure(1); set(gcf, 'visible', 'off');  % headless
+    % ... your plotting code ...
+    saveas(gcf, sprintf('figures/%s.png', fig_id));
+    print(sprintf('figures/%s.svg', fig_id), '-dsvg');  % required for LaTeX export
+    close all;
+
+You STILL register the figure in the JSON directive's `figures_saved`
+(`[{"id": "tornado_sensitivity", "caption": "..."}]`) — the contract is
+identical to the Python path. `save_figure` does NOT exist in MATLAB, so the
+two-line `saveas` + `print` idiom above is mandatory.
+
+## 4. Paper-source linkage (mirrors the Python rule)
+Every MATLAB cell MUST begin with a paper-anchor comment, e.g.:
+
+    % --- Section 5.3 of paper: 8-state food-web ODE (Eqs. 4-11) ---
+
+Same discipline as the Python `# --- ... ---` convention; the grader-facing
+audit trail does not care which language emitted the figure.
+
+## 5. Headless rendering rule
+The runner has no display. Put this exact block at the top of every MATLAB
+cell that creates figures:
+
+    if exist('graphics_toolkit', 'builtin'), graphics_toolkit('gnuplot'); end
+    set(0, 'DefaultFigureVisible', 'off');
+
+Without it, Octave on macOS/Linux CI crashes the moment `figure()` is called.
+
+## 6. Numeric reproducibility
+At the top of any MATLAB cell that uses randomness:
+
+    rng(20240202);             % MATLAB
+    rand('state', 20240202);   % Octave-compatible fallback (no-op on MATLAB)
+
+Keep the same `RANDOM_SEED = 20240202` constant convention as the Python
+rules — winners' notebooks reproduce bit-for-bit.
+
+## 7. Error handling
+Wrap risky calls so the cell stdout shows a useful traceback instead of a
+bare non-zero exit code from `matlab -batch`:
+
+    try
+        % ... risky call (fmincon, ode45 on a stiff system, ...) ...
+    catch err
+        disp(getReport(err));
+    end
+
+## 8. Combined workflow example (the canonical 3-turn arc)
+This is the recommended pattern when you genuinely need MATLAB — Python
+handles I/O and plotting, MATLAB does the heavy solver work, and a `.mat`
+file is the hand-off medium:
+
+    Turn 1 (python):  load CSV, clean, save .mat
+                      scipy.io.savemat('handoff_in.mat', {'X': X, 'y': y})
+    Turn 2 (matlab):  load .mat, fit constrained optimisation via fmincon,
+                      save results.mat
+                      load('handoff_in.mat'); ...; save('results.mat','theta_hat','J_hist');
+    Turn 3 (python):  load results.mat (via scipy.io.loadmat), plot
+                      publication-quality figures with matplotlib
+
+The cross-language `.mat` handoff is the key idiom: do NOT try to emit JSON
+or CSV from MATLAB and re-parse — `.mat` round-trips preserve numeric dtype
+and shape, the others do not.
+
+## 9. CUMCM 国一 / MCM Outstanding 实证写法约定
+We audited ~595 .m files in the CUMCM 国一 corpus and 8 in the MCM Outstanding
+code dumps. The following idioms appear in 60%+ of winners and zero AI outputs
+— adopt them verbatim:
+
+- **Standard cell preamble** (winners' universal opener; comes BEFORE the
+  paper-anchor comment from rule 4):
+
+      clear; close all; clc;
+
+  Cell scoping is real: `matlab -batch` starts fresh, but the convention
+  signals discipline to a grader and clears stale figure handles on rerun.
+
+- **Section markers with `%%`** (MATLAB editor folds these as cell groups —
+  same idea as Jupyter cells in a single file):
+
+      %% 模型 I: 资源-性比反应范数
+      ...code for model I...
+      %% 模型 II: 食物网耦合 ODE
+      ...code for model II...
+
+  Use Chinese OR English section titles, matching the paper's language.
+
+- **Function-per-file convention**: when emitting an auxiliary function
+  (e.g. an objective for `fmincon`), put it in its OWN MATLAB cell with a
+  comment naming the intended filename, e.g. `% File: objective.m`. The
+  MatlabSession may extract these into separate .m files in the future.
+
+- **Multi-return signatures** are idiomatic, do NOT shy away from them:
+
+      function [zbest, y_hist, exit_flag] = optimize_lamprey(params, x0)
+
+- **Encoding**: write all string literals with ASCII-safe content OR explicit
+  UTF-8. Old CUMCM .m files (pre-2018) used GB2312-encoded Chinese comments
+  that show as mojibake in our pdftotext audit; never emit non-UTF8 bytes.
+  When in doubt, English comments are safest.
+
+- **Deprecated APIs to avoid**: `mmreader` → use `VideoReader`; `newff` (old
+  neural net) → unavailable in Octave, prefer `scipy.optimize` from Python.
+
+These conventions are not aesthetic — they are the signals a CUMCM 国一
+evaluator scans for when triaging code-quality at speed.
 """
 
 [user_template]
@@ -111,6 +339,8 @@ Modeler spec (JSON):
 
 Chart catalog (pick an `id` and name it in `reasoning` as `chart_type_id=<id>`):
 {{ chart_catalog_index }}
+
+The optional "language" field in your JSON output picks the runtime: "python" (default) routes to the Jupyter kernel; "matlab" routes to MatlabSession (matlab -batch or octave). One code block per turn; state does not persist across MATLAB turns.
 
 Respond with a JSON object: {"reasoning": "...", "code": "...", "done": false, "summary": null, "figures_saved": []}.
 Follow the Modeler's chosen_approach and algorithm_outline. Start by

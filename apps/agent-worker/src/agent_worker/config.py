@@ -80,6 +80,17 @@ class Settings(BaseSettings):
     openalex_disabled: bool = Field(default=False, alias="OPENALEX_DISABLED")
     crossref_disabled: bool = Field(default=False, alias="CROSSREF_DISABLED")
 
+    # --- Critic model override --------------------------------------------
+    # Critic produces small JSON verdicts, not prose — a cheaper/smaller
+    # model is usually sufficient. When set, CriticAgent uses this model
+    # regardless of the run-level model_override. Empty string ("" / unset)
+    # means "fall through to the run-level model_override", preserving the
+    # pre-round-9 behaviour. Surfaced because round-8 audit showed Critic
+    # accounts for ~33.5 % of run cost.
+    critic_model_override: str = Field(
+        default="", alias="MM_CRITIC_MODEL_OVERRIDE"
+    )
+
 
 def get_settings() -> Settings:
     """Load settings. Kept as a function so tests can override easily."""

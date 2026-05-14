@@ -164,6 +164,52 @@ async def test_coder_agent_retries_on_parse_error(
     assert len(output.cells) == 1
 
 
+async def test_coder_agent_parses_lenient_multi_object(
+    tmp_path: Path,
+    problem: ProblemInput,
+    analysis: AnalyzerOutput,
+    spec: ModelSpec,
+) -> None:
+    """Round-10 regression: gpt-5.5 with reasoning_effort=high sometimes
+    emits one valid CoderDirective JSON followed by a second one (or
+    free-form prose) back-to-back without an array wrapper. Strict
+    `orjson.loads` rejects the whole blob and the QA run failed at Coder
+    after 3 stream retries (¥1.25 wasted). The parser now falls back to
+    `json.JSONDecoder.raw_decode` and accepts the first valid object.
+    """
+
+    class _MultiObjGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream_completion(self, **_: object) -> AsyncIterator[str]:
+            self.calls += 1
+            # Two back-to-back JSON objects; first is the only one the
+            # parser should consume. Without lenient parse this raises
+            # `AgentParseError: not valid JSON: unexpected end of data`.
+            yield (
+                '{"reasoning":"first object","code":"print(7)","done":true,'
+                '"summary":"first done"}'
+                '{"reasoning":"second object","code":"x=1","done":false,'
+                '"summary":null}'
+            )
+
+        async def close(self) -> None:
+            pass
+
+    gateway = _MultiObjGateway()
+    emitter = _FakeEmitter()
+    kernel = KernelSession(uuid4(), tmp_path)
+
+    agent = CoderAgent(gateway, emitter, kernel)  # type: ignore[arg-type]
+    output = await agent.run(problem, analysis, spec)
+
+    # Parse succeeded on the first try — no retry needed.
+    assert gateway.calls == 1
+    assert output.final_summary == "first done"
+    assert len(output.cells) == 1
+
+
 async def test_coder_agent_respects_explicit_iteration_cap(
     tmp_path: Path,
     problem: ProblemInput,

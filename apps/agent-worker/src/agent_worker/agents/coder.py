@@ -15,7 +15,6 @@ import json
 import time
 from typing import Any, Literal
 
-import orjson
 from mm_contracts import (
     AnalyzerOutput,
     CellExecution,
@@ -28,7 +27,7 @@ from mm_contracts import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from agent_worker.agents.base import AgentError, AgentParseError
+from agent_worker.agents.base import AgentError, AgentParseError, _parse_json_lenient
 from agent_worker.chart_catalog import render_index_markdown
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
@@ -481,9 +480,16 @@ class CoderAgent:
             if cleaned.endswith("```"):
                 cleaned = cleaned.rsplit("```", 1)[0]
             cleaned = cleaned.strip()
+        # Use the same lenient parse BaseAgent does (round 7): strict first,
+        # then `json.JSONDecoder.raw_decode` to recover when gpt-5.5 emits a
+        # valid JSON object followed by extra prose / a second back-to-back
+        # object. Without this the Coder fatally fails on a model output
+        # mode that's well within the lenient parser's recovery envelope.
         try:
-            obj = orjson.loads(cleaned)
-        except Exception as e:
+            obj = _parse_json_lenient(cleaned)
+        except AgentParseError:
+            raise
+        except Exception as e:  # noqa: BLE001 — match BaseAgent's contract
             raise AgentParseError(f"not valid JSON: {e}") from e
         try:
             return CoderDirective.model_validate(obj)

@@ -57,6 +57,7 @@ from agent_worker.agents.evidence import (
     scan_anonymity_violations,
     sensitivity_criteria,
 )
+from agent_worker.agents.hooks import aggregate, critique_to_hook_result
 from agent_worker.config import get_settings
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
@@ -130,6 +131,18 @@ def _critique_should_fail_run(report: CritiqueReport) -> bool:
     if report.has_blocking_findings:
         return (not report.passed) or report.budget_exhausted
     return False
+
+
+_STAGE_ORDER = ["analyzer", "searcher", "modeler", "coder", "writer"]
+
+
+def _next_stage_after(stage: str) -> str | None:
+    """Return the stage name that consumes `stage`'s output, or None for writer."""
+    try:
+        i = _STAGE_ORDER.index(stage)
+    except ValueError:
+        return None
+    return _STAGE_ORDER[i + 1] if i + 1 < len(_STAGE_ORDER) else None
 
 
 def _searcher_review_criteria() -> list[str]:
@@ -219,6 +232,35 @@ async def _review_and_maybe_revise(
         raise AgentError(
             f"Critic rejected {target_agent} after revision: {report.summary}"
         )
+
+    # Post-stage hook lifecycle (borrowed from claude-code-sourcemap
+    # types/hooks.ts:50-166). Convert the final Critic verdict into a
+    # HookResult and surface any `additional_context` as a structured
+    # `log` event tagged for the NEXT stage. Future iterations can read
+    # this reminder back from events.jsonl and render it as a
+    # `<system_reminder>` block in the downstream prompt; for this round
+    # we only persist the signal so post-mortems carry it forward.
+    hook_result = critique_to_hook_result(report)
+    agg = aggregate([hook_result])
+    reminder = agg.merged_reminder()
+    if reminder:
+        import contextlib
+
+        # Critic exposes `emitter` on all current builds; suppress just in
+        # case a future refactor changes the surface — we never want the
+        # hook to be the reason a run fails.
+        with contextlib.suppress(AttributeError):
+            await critic.emitter.emit(  # type: ignore[attr-defined]
+                "log",
+                {
+                    "level": "info",
+                    "message": "post-stage reminder available for downstream",
+                    "for_stage": _next_stage_after(target_agent),
+                    "reminder_chars": len(reminder),
+                    "reminder": reminder,
+                },
+                agent=target_agent,
+            )
     return current
 
 

@@ -52,8 +52,6 @@ Return a JSON object matching SearchFindings. No prose, no markdown fences.
 
 [user_template]
 text = """
-{{ upstream_reminders }}
-
 Problem type: {{ competition_type }}
 Problem: {{ problem_text }}
 
@@ -62,6 +60,8 @@ Analyzer scope: {{ analysis_json }}
 Queries executed: {{ queries_json }}
 
 Raw retrieval results (mixed arXiv + web): {{ papers_json }}
+
+{{ upstream_reminders }}
 
 Return SearchFindings JSON keys: queries, papers (with relevance_reason),
 key_findings, datasets_mentioned.

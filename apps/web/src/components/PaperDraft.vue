@@ -27,7 +27,7 @@ function isRelativeFigureHref(href: string): boolean {
 }
 
 function makeMarked(runId: string): Marked {
-  return new Marked({
+  const m = new Marked({
     gfm: true,
     breaks: false,
     walkTokens(token: Token) {
@@ -37,8 +37,38 @@ function makeMarked(runId: string): Marked {
         const n = img.href.startsWith("./") ? img.href.slice(2) : img.href;
         img.href = figureUrl(runId, n);
       }
+      // Round-6 a11y pass (Agent C #5): figures emitted with empty alt
+      // (the Writer outputs `![](figures/foo.png)`). Fall back to the
+      // title attr or the file stem so screen readers get something.
+      if (!img.text || !img.text.trim()) {
+        const stem = img.href.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "figure";
+        img.text = (img.title && img.title.trim()) || stem.replace(/_/g, " ");
+      }
     },
   });
+  // Add `loading="lazy"` + `decoding="async"` to every rendered image so
+  // a long paper with 15+ figures doesn't block first paint. marked v15
+  // honours custom renderers via `use({renderer: ...})`.
+  m.use({
+    renderer: {
+      image(token) {
+        const href = token.href ?? "";
+        const text = token.text ?? "";
+        const title = token.title ? ` title="${escapeHtml(token.title)}"` : "";
+        const alt = escapeHtml(text);
+        return `<img src="${escapeHtml(href)}" alt="${alt}"${title} loading="lazy" decoding="async" />`;
+      },
+    },
+  });
+  return m;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 const title = computed<string>(() => {

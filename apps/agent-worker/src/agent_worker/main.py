@@ -76,6 +76,7 @@ async def _process(
     entry_id: str,
     fields: dict[Any, Any],
     semaphore: asyncio.Semaphore,
+    run_locks: dict[UUID, asyncio.Lock],
 ) -> None:
     """Process one job entry: run the pipeline, emit error on failure, XACK."""
     async with semaphore:
@@ -83,7 +84,12 @@ async def _process(
         try:
             run_id, problem = _parse_entry(fields)
             log.info("job_started", run_id=str(run_id), entry_id=entry_id)
-            await run_pipeline(redis, run_id, problem)
+            # Per-run_id mutex (shared with the finetune consumer) so a
+            # late-arriving fine-tune doesn't race the pipeline writing
+            # paper.meta.json / notebook.ipynb / figures/.
+            lock = run_locks.setdefault(run_id, asyncio.Lock())
+            async with lock:
+                await run_pipeline(redis, run_id, problem)
             log.info("job_completed", run_id=str(run_id), entry_id=entry_id)
         except Exception as exc:  # noqa: BLE001 — we want to catch everything here
             log.exception("job_failed", entry_id=entry_id, error=str(exc))
@@ -110,6 +116,7 @@ async def _consume_loop(
     stop: asyncio.Event,
     semaphore: asyncio.Semaphore,
     in_flight: set[asyncio.Task[None]],
+    run_locks: dict[UUID, asyncio.Lock],
 ) -> None:
     """Main XREADGROUP loop. Runs until `stop` is set."""
     while not stop.is_set():
@@ -134,7 +141,7 @@ async def _consume_loop(
         for _stream, entries in resp:
             for entry_id, fields in entries:
                 task = asyncio.create_task(
-                    _process(redis, _decode(entry_id), fields, semaphore)
+                    _process(redis, _decode(entry_id), fields, semaphore, run_locks)
                 )
                 in_flight.add(task)
                 task.add_done_callback(in_flight.discard)
@@ -173,10 +180,16 @@ async def run(settings: Settings | None = None) -> None:
     stop = asyncio.Event()
     _install_signal_handlers(stop)
 
+    # Per-run_id mutex shared between the pipeline consumer and the
+    # finetune consumer — guarantees we never have two writers on the same
+    # notebook / paper.meta.json / figures dir. Round-6 audit (Agent A
+    # finding #2) flagged this as a major concurrency hazard.
+    run_locks: dict[UUID, asyncio.Lock] = {}
+
     semaphore = asyncio.Semaphore(cfg.worker_concurrency)
     in_flight: set[asyncio.Task[None]] = set()
     consumer_task = asyncio.create_task(
-        _consume_loop(redis, consumer, stop, semaphore, in_flight)
+        _consume_loop(redis, consumer, stop, semaphore, in_flight, run_locks)
     )
 
     # Parallel consumer for paper fine-tune jobs (mm:finetune). Separate
@@ -186,7 +199,13 @@ async def run(settings: Settings | None = None) -> None:
     finetune_consumer = _finetune_consumer_name()
     finetune_task = asyncio.create_task(
         _finetune_consume_loop(
-            redis, cfg, finetune_consumer, stop, finetune_semaphore, finetune_in_flight
+            redis,
+            cfg,
+            finetune_consumer,
+            stop,
+            finetune_semaphore,
+            finetune_in_flight,
+            run_locks,
         )
     )
 

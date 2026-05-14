@@ -132,8 +132,6 @@ If you see `few_shot_exemplars` in the user message, those are summary excerpts 
 
 [user_template]
 text = """
-{{ upstream_reminders }}
-
 Problem type: {{ competition_type }}
 
 Problem statement:
@@ -170,6 +168,8 @@ back to title+abstract citation from the Sources list.
 ## Same-problem-type O/F-prize exemplars (structure reference, do NOT copy)
 
 {{ few_shot_exemplars }}
+
+{{ upstream_reminders }}
 
 Respond with a JSON object. Required top-level keys:
   title (string),

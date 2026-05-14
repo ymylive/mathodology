@@ -26,7 +26,6 @@ from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.kernel import KernelSession
 from agent_worker.logging import get_logger
-from agent_worker.matlab import MatlabSession
 
 FINETUNE_STREAM = "mm:finetune"
 FINETUNE_GROUP = "mm-finetune-workers"
@@ -100,7 +99,6 @@ async def run_finetune(
     emitter = EventEmitter(redis, run_id, events_log_path=run_dir / "events.jsonl")
     gateway = GatewayClient(cfg.gateway_http, cfg.dev_auth_token)
     kernel = KernelSession(run_id, runs_dir)
-    matlab_session = MatlabSession(run_id, runs_dir)
 
     try:
         await emitter.emit(
@@ -112,18 +110,19 @@ async def run_finetune(
             agent="paper_editor",
         )
 
+        # PaperEditorAgent currently only consumes the Python kernel; a
+        # MatlabSession will be wired in a follow-up when an `edit_constant`
+        # flow targets a .m file.
         agent = PaperEditorAgent(
             gateway=gateway,
             emitter=emitter,
             kernel=kernel,
-            matlab_session=matlab_session,
             run_dir=run_dir,
         )
 
         summary = await agent.fine_tune(
             user_message=user_message,
             run_dir=run_dir,
-            session_id=session_id,
         )
 
         await emitter.emit(
@@ -155,6 +154,7 @@ async def _process(
     entry_id: str,
     fields: dict[Any, Any],
     semaphore: asyncio.Semaphore,
+    run_locks: dict[UUID, asyncio.Lock],
 ) -> None:
     async with semaphore:
         try:
@@ -165,7 +165,12 @@ async def _process(
                 session_id=str(session_id),
                 entry_id=entry_id,
             )
-            await run_finetune(redis, cfg, run_id, session_id, message)
+            # Acquire the per-run mutex so we never overlap a fine-tune turn
+            # with the original pipeline (which writes the same notebook +
+            # paper.meta.json + figures dir) — Agent A flagged this race.
+            lock = run_locks.setdefault(run_id, asyncio.Lock())
+            async with lock:
+                await run_finetune(redis, cfg, run_id, session_id, message)
             log.info("finetune_completed", run_id=str(run_id), entry_id=entry_id)
         except Exception as exc:  # noqa: BLE001
             log.exception("finetune_process_failed", entry_id=entry_id, error=str(exc))
@@ -183,8 +188,16 @@ async def consume_loop(
     stop: asyncio.Event,
     semaphore: asyncio.Semaphore,
     in_flight: set[asyncio.Task[None]],
+    run_locks: dict[UUID, asyncio.Lock] | None = None,
 ) -> None:
-    """Same XREADGROUP loop as main.py but against mm:finetune."""
+    """Same XREADGROUP loop as main.py but against mm:finetune.
+
+    `run_locks` is a shared dict that pairs with main.py's pipeline
+    consumer; both grab the same per-run_id mutex so a fine-tune turn
+    never overlaps with the original pipeline writing the same
+    notebook + paper.meta.json + figures dir.
+    """
+    locks = run_locks if run_locks is not None else {}
     await _ensure_group(redis)
     while not stop.is_set():
         try:
@@ -205,9 +218,9 @@ async def consume_loop(
         if not resp:
             continue
         for _stream, entries in resp:
-            for entry_id, fields in entries:
+            for entry_id, fields in entries:  # noqa: B007 — entry_id used below
                 task = asyncio.create_task(
-                    _process(redis, cfg, _decode(entry_id), fields, semaphore)
+                    _process(redis, cfg, _decode(entry_id), fields, semaphore, locks)
                 )
                 in_flight.add(task)
                 task.add_done_callback(in_flight.discard)

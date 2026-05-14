@@ -101,6 +101,7 @@ AgentName = Literal[
     "coder",
     "writer",
     "critic",
+    "paper_editor",
     "searcher",
 ]
 
@@ -110,9 +111,16 @@ EventKind = Literal[
     "log",
     "token",
     "cost",
+    "finetune.session.start",
+    "finetune.session.done",
+    "finetune.session.error",
+    "finetune.tool_call",
+    "finetune.tool_result",
+    "finetune.token",
     "agent.output",
     "kernel.stdout",
     "kernel.figure",
+    "kernel.error",
     "error",
     "done",
 ]

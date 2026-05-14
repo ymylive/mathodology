@@ -353,15 +353,11 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
             </div>
           </div>
           <div style="display:flex; gap:8px;">
-            <button
-              class="btn ghost"
-              disabled
-              :title="i18n.t('pause is not implemented yet', '暂停功能尚未实现')"
-            >
-              ⏸ <T en="Pause" zh="暂停" />
-            </button>
+            <!-- Pause button removed in round-6 UX pass: it was disabled
+                 with only a tooltip explanation (Agent C #5). Replace with
+                 a real Cancel route once the backend exposes one. -->
             <RouterLink class="btn hi" :to="{ name: 'workbench' }">
-              ▶ <T en="New run" zh="新建运行" />
+              <span aria-hidden="true">▶</span> <T en="New run" zh="新建运行" />
             </RouterLink>
           </div>
         </div>

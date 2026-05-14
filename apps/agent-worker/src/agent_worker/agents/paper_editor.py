@@ -42,6 +42,7 @@ MAX_ITERATIONS = 8
 ToolName = Literal[
     "read_paper",
     "edit_section",
+    "surgical_edit",
     "edit_constant",
     "run_cell",
     "regenerate_figure",

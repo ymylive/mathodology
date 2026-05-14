@@ -13,6 +13,11 @@ import type { AgentEvent } from "@mathodology/contracts";
 import { useRunStore } from "@/stores/run";
 import { useI18n } from "@/composables/useI18n";
 import { useCountUp } from "@/composables/useCountUp";
+import {
+  formatCurrency,
+  formatTimeHMS,
+  formatTokenCount,
+} from "@/utils/format";
 import T from "./T.vue";
 
 const props = defineProps<{ runId: string; now: number }>();
@@ -39,9 +44,7 @@ interface Line {
 }
 
 function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "--:--:--";
-  return d.toLocaleTimeString("en-GB", { hour12: false });
+  return formatTimeHMS(iso, i18n.lang);
 }
 
 function agentLabel(ev: AgentEvent): string {
@@ -77,7 +80,9 @@ function lineFor(ev: AgentEvent): Line | null {
       const dur =
         typeof p.duration_ms === "number" ? (p.duration_ms / 1000).toFixed(1) + "s" : null;
       const cost =
-        typeof p.cost_rmb === "number" ? `¥${p.cost_rmb.toFixed(3)}` : null;
+        typeof p.cost_rmb === "number"
+          ? formatCurrency(p.cost_rmb, i18n.lang, 3)
+          : null;
       const parts = ["✓", dur, cost].filter((x): x is string => typeof x === "string");
       msg = parts.join(" · ");
       break;
@@ -97,7 +102,9 @@ function lineFor(ev: AgentEvent): Line | null {
       const p = ev.payload as { model?: unknown; delta_rmb?: unknown };
       const model = typeof p.model === "string" ? p.model : "—";
       const delta =
-        typeof p.delta_rmb === "number" ? `¥${p.delta_rmb.toFixed(3)}` : "";
+        typeof p.delta_rmb === "number"
+          ? formatCurrency(p.delta_rmb, i18n.lang, 3)
+          : "";
       cls = "lv-info";
       msg = `${escapeHtml(model)} · ${delta}`;
       break;
@@ -113,7 +120,9 @@ function lineFor(ev: AgentEvent): Line | null {
       const p = ev.payload as { status?: unknown; cost_rmb?: unknown };
       const status = typeof p.status === "string" ? p.status : "done";
       const cost =
-        typeof p.cost_rmb === "number" ? ` · ¥${p.cost_rmb.toFixed(3)}` : "";
+        typeof p.cost_rmb === "number"
+          ? ` · ${formatCurrency(p.cost_rmb, i18n.lang, 3)}`
+          : "";
       msg = `run ${escapeHtml(status)}${cost}`;
       agentCls = "lv-info";
       break;
@@ -241,7 +250,13 @@ const elapsedMs = computed(() => {
 // `—`; once it's done we freeze the value at the final elapsed time so the
 // viewer sees the actual total.
 const estTotalMs = computed<number | null>(() => {
-  if (run.status === "done" || run.status === "failed") return elapsedMs.value;
+  if (
+    run.status === "done" ||
+    run.status === "failed" ||
+    run.status === "cancelled"
+  ) {
+    return elapsedMs.value;
+  }
   return null;
 });
 
@@ -255,8 +270,7 @@ function fmtMs(ms: number | null): string {
 }
 
 function fmtK(n: number): string {
-  if (n < 1000) return String(n);
-  return `${(n / 1000).toFixed(1)}k`;
+  return formatTokenCount(n, i18n.lang);
 }
 
 // --- motion: smooth count-up for cost + token totals in the footer --------

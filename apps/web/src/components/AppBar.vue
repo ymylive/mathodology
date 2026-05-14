@@ -29,18 +29,21 @@ const route = useRoute();
         <RouterLink
           :to="{ name: 'showcase' }"
           :class="{ on: route.name === 'showcase' }"
+          :aria-current="route.name === 'showcase' ? 'page' : undefined"
         >
           <T en="Overview" zh="概览" />
         </RouterLink>
         <RouterLink
           :to="{ name: 'dashboard' }"
           :class="{ on: route.name === 'dashboard' }"
+          :aria-current="route.name === 'dashboard' ? 'page' : undefined"
         >
           <T en="Dashboard" zh="仪表盘" />
         </RouterLink>
         <RouterLink
           :to="{ name: 'workbench' }"
           :class="{ on: route.name === 'workbench' }"
+          :aria-current="route.name === 'workbench' ? 'page' : undefined"
         >
           <T en="Workbench" zh="工作台" />
         </RouterLink>

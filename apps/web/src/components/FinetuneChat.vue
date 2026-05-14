@@ -14,7 +14,10 @@ import { computed, nextTick, ref, watch } from "vue";
 import { Marked } from "marked";
 import { useFinetuneStore } from "@/stores/finetune";
 import type { Message, ToolCall } from "@/stores/finetune";
+import { useI18n } from "@/composables/useI18n";
 import T from "./T.vue";
+
+const i18n = useI18n();
 
 const props = defineProps<{ runId: string }>();
 const emit = defineEmits<{
@@ -260,7 +263,10 @@ const messages = computed<Message[]>(() => store.messages);
                 class="ft-reasoning"
                 :open="expandedReasoning.has(m.id)"
               >
-                <summary @click.prevent="toggleReasoning(m.id)">
+                <summary
+                  :aria-expanded="expandedReasoning.has(m.id)"
+                  @click.prevent="toggleReasoning(m.id)"
+                >
                   <span class="mono ft-reasoning-toggle">
                     {{ expandedReasoning.has(m.id) ? "▾" : "▸" }}
                     <T en="reasoning" zh="推理" />
@@ -302,6 +308,12 @@ const messages = computed<Message[]>(() => store.messages);
                       v-if="entry.truncated"
                       type="button"
                       class="ft-arg-toggle mono"
+                      :aria-expanded="expandedToolArgs.has(tc.id)"
+                      :aria-label="
+                        expandedToolArgs.has(tc.id)
+                          ? i18n.t('Collapse tool args', '收起参数')
+                          : i18n.t('Expand tool args', '展开参数')
+                      "
                       @click="toggleToolArgs(tc.id)"
                     >
                       {{ expandedToolArgs.has(tc.id) ? "−" : "+" }}

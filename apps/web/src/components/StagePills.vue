@@ -11,6 +11,7 @@ import { computed, ref, watch } from "vue";
 import type { AgentEvent, AgentName } from "@mathodology/contracts";
 import { useRunStore } from "@/stores/run";
 import { useI18n } from "@/composables/useI18n";
+import { formatCurrency } from "@/utils/format";
 
 const props = defineProps<{ now: number }>();
 
@@ -101,7 +102,7 @@ function fmtDuration(ms: number | null): string {
 function detail(p: Pill): string {
   if (p.state === "q") return i18n.t("queued", "排队中");
   const dur = fmtDuration(p.durationMs);
-  if (p.costRmb > 0) return `${dur} · ¥${p.costRmb.toFixed(3)}`;
+  if (p.costRmb > 0) return `${dur} · ${formatCurrency(p.costRmb, i18n.lang, 3)}`;
   return dur;
 }
 

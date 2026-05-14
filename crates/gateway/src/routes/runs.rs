@@ -185,6 +185,11 @@ pub async fn finetune_run(
 pub struct CancelAccepted {
     pub run_id: Uuid,
     pub status: &'static str,
+    /// True when this POST flipped the cancel flag; false when the flag
+    /// was already set by an earlier click (idempotent). Lets the UI
+    /// distinguish "cancel sent" from "already cancelling" without
+    /// needing a second round-trip.
+    pub already_signalled: bool,
 }
 
 /// `POST /runs/:run_id/cancel` — signal the worker to halt the run.
@@ -215,6 +220,7 @@ pub async fn cancel_run(
         Json(CancelAccepted {
             run_id,
             status: "cancel_signalled",
+            already_signalled: !newly_set,
         }),
     ))
 }

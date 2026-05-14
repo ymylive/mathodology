@@ -308,6 +308,7 @@ const tavilyDepthDisabled = computed(() => store.effectivePrimary !== "tavily");
             :key="d.id"
             type="button"
             :class="{ on: store.tavily_depth === d.id }"
+            :aria-pressed="store.tavily_depth === d.id"
             :disabled="readonly || tavilyDepthDisabled"
             @click="onDepth(d.id)"
           >

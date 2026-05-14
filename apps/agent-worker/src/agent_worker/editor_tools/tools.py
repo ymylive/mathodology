@@ -7,11 +7,15 @@ executing kernel cells, calling the gateway exporter) — the agent loop is
 the only thing that decides WHEN to call them; the tools themselves never
 talk to the LLM.
 
-The five-tool catalogue mirrors the most common fine-tune verbs we observed
+The tool catalogue mirrors the most common fine-tune verbs we observed
 during the M2/M3 award-mode rollout:
 
 * `read_paper`        — inspect the current draft.
-* `edit_section`      — replace one section's body markdown verbatim.
+* `edit_section`      — replace one section's body markdown verbatim
+                        (full-rewrite path, expensive on large sections).
+* `surgical_edit`     — find/replace a unique anchor string inside the
+                        paper body — same discipline as Anthropic's Edit tool
+                        (exact match, uniqueness, optional replace_all).
 * `edit_constant`     — patch a `NAME = ...` assignment in the notebook AND
                         re-execute the affected cells in the persistent kernel.
 * `run_cell`          — run arbitrary Python (regenerate a chart, sanity-check
@@ -234,6 +238,226 @@ class EditSectionTool:
             ok=True,
             summary=f"Replaced section {title!r} body ({len(new_body)} chars).",
         )
+
+
+# ------------------------------------------------------------- surgical edit
+
+
+def _editable_targets(meta: dict[str, Any]) -> list[tuple[str, dict[str, Any], str]]:
+    """Enumerate (label, container, field) tuples we are willing to surgically edit.
+
+    A "target" is a (label, container, field) triple where:
+      * label    — human-readable name surfaced in error/diff messages
+                   ("abstract" or the section title)
+      * container — the dict whose `field` we will rewrite in place
+      * field    — the key inside `container` holding the markdown body
+
+    We deliberately exclude `title` (single-line, surgical edit is overkill)
+    and `references` (numbered list; replacing one item by its rendered prefix
+    breaks renumbering). Both can still be handled via `edit_section` / a
+    follow-up rewrite if needed.
+    """
+    targets: list[tuple[str, dict[str, Any], str]] = []
+    if "abstract" in meta:
+        targets.append(("Abstract", meta, "abstract"))
+    for sec in meta.get("sections", []) or []:
+        title = sec.get("title", "") or "(untitled)"
+        targets.append((title, sec, "body_markdown"))
+    return targets
+
+
+def _diff_window(body: str, idx: int, old_text: str, new_text: str) -> str:
+    """Return a small windowed diff context for the agent to verify.
+
+    Shows ~60 chars of context on either side of the splice point with the
+    old/new strings rendered as a unified-style fragment. We do NOT depend on
+    the stdlib `difflib` to keep the output deterministic and compact — the
+    agent only needs enough context to confirm "you edited the right place".
+    """
+    ctx_before = body[max(0, idx - 60) : idx]
+    ctx_after = body[idx + len(old_text) : idx + len(old_text) + 60]
+    return (
+        "  ..."
+        + ctx_before.replace("\n", "\\n")
+        + "\n"
+        + "- "
+        + old_text.replace("\n", "\\n")
+        + "\n"
+        + "+ "
+        + new_text.replace("\n", "\\n")
+        + "\n"
+        + "  "
+        + ctx_after.replace("\n", "\\n")
+        + "..."
+    )
+
+
+class SurgicalEditTool:
+    """Find-and-replace an exact substring inside paper.meta.json bodies.
+
+    The discipline mirrors Anthropic's Edit tool: exact string match (NO regex
+    — too easy to misfire on markdown / LaTeX), uniqueness across the searched
+    scope, and an explicit `replace_all` flag for when the agent *does* want to
+    touch every occurrence (rename a variable across the paper, etc.).
+
+    Scope:
+      * If `section_title` is provided, the search is limited to that one
+        section's body markdown (or the abstract if `Abstract`).
+      * Otherwise we search abstract + every section body and locate the
+        SINGLE container that holds the anchor. We do NOT span containers:
+        if "X" appears once in Summary and once in Sensitivity Analysis,
+        that counts as TWO occurrences (not one), and we ask the agent to
+        widen the anchor or pass `section_title`.
+
+    args:
+      old_text:       str   (required) — exact substring to find
+      new_text:       str   (required) — replacement text (may be empty
+                                          to delete the anchor)
+      replace_all:    bool  (default False) — override uniqueness check
+      section_title:  str | None — narrow search to one section
+    """
+
+    name = "surgical_edit"
+
+    async def execute(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        old_text = args.get("old_text")
+        new_text = args.get("new_text")
+        replace_all = bool(args.get("replace_all", False))
+        section_title = args.get("section_title")
+
+        if not isinstance(old_text, str) or not old_text:
+            return ToolResult(
+                ok=False,
+                summary="surgical_edit requires a non-empty `old_text`.",
+                error="missing old_text",
+            )
+        if not isinstance(new_text, str):
+            return ToolResult(
+                ok=False,
+                summary="surgical_edit requires `new_text` as a string.",
+                error="missing or non-string new_text",
+            )
+        if old_text == new_text:
+            return ToolResult(
+                ok=False,
+                summary="surgical_edit refused: old_text == new_text (noop).",
+                error="old_text equals new_text",
+            )
+
+        all_targets = _editable_targets(ctx.paper_meta)
+        if section_title is not None:
+            if not isinstance(section_title, str) or not section_title:
+                return ToolResult(
+                    ok=False,
+                    summary="surgical_edit `section_title` must be a non-empty string.",
+                    error="bad section_title",
+                )
+            scoped = [
+                t
+                for t in all_targets
+                if t[0] == section_title
+                or (
+                    section_title.lower() == "abstract" and t[0] == "Abstract"
+                )
+            ]
+            if not scoped:
+                known = [t[0] for t in all_targets]
+                return ToolResult(
+                    ok=False,
+                    summary=f"surgical_edit: unknown section_title {section_title!r}.",
+                    error=f"Unknown section_title {section_title!r}. Known: {known}",
+                )
+            targets = scoped
+        else:
+            targets = all_targets
+
+        # Count total occurrences across all in-scope targets.
+        hits: list[tuple[int, str, dict[str, Any], str, str]] = []
+        # tuple: (count_in_body, label, container, field, body)
+        total = 0
+        for label, container, field_name in targets:
+            body = container.get(field_name, "") or ""
+            if not isinstance(body, str):
+                continue
+            count = body.count(old_text)
+            if count > 0:
+                hits.append((count, label, container, field_name, body))
+                total += count
+
+        if total == 0:
+            scope_desc = (
+                f"section {section_title!r}"
+                if section_title
+                else "any abstract/section body"
+            )
+            preview = old_text if len(old_text) <= 80 else old_text[:80] + "..."
+            return ToolResult(
+                ok=False,
+                summary=(
+                    f"surgical_edit: no match for old_text in {scope_desc}. "
+                    "Retry with a different anchor."
+                ),
+                error=(
+                    f"old_text not found in {scope_desc}. "
+                    f"Searched anchor (first 80 chars): {preview!r}"
+                ),
+            )
+
+        if total > 1 and not replace_all:
+            locations = ", ".join(
+                f"{label}×{count}" for count, label, _c, _f, _b in hits
+            )
+            return ToolResult(
+                ok=False,
+                summary=(
+                    f"surgical_edit: old_text appears {total} times "
+                    f"({locations}). Widen the anchor with more surrounding "
+                    "context, narrow with `section_title`, or pass "
+                    "`replace_all=true`."
+                ),
+                error=f"non-unique match ({total} occurrences): {locations}",
+            )
+
+        # Apply the replacement. For single-hit we record a diff window; for
+        # replace_all we record the count per target.
+        per_target_counts: list[tuple[str, int]] = []
+        diff_lines: list[str] = []
+        for count, label, container, field_name, body in hits:
+            if replace_all:
+                new_body = body.replace(old_text, new_text)
+                replaced = count
+            else:
+                # Unique-mode: exactly one hit, in exactly one container.
+                idx = body.find(old_text)
+                new_body = body[:idx] + new_text + body[idx + len(old_text) :]
+                replaced = 1
+                diff_lines.append(f"@ {label}:")
+                diff_lines.append(_diff_window(body, idx, old_text, new_text))
+            container[field_name] = new_body
+            per_target_counts.append((label, replaced))
+
+        _write_paper_artifacts(ctx)
+
+        total_replaced = sum(n for _, n in per_target_counts)
+        if replace_all:
+            target_summary = ", ".join(f"{lbl}×{n}" for lbl, n in per_target_counts)
+            summary = (
+                f"surgical_edit: replaced {total_replaced} occurrence(s) "
+                f"across {target_summary}."
+            )
+            detail = (
+                f"old_text ({len(old_text)} chars) -> "
+                f"new_text ({len(new_text)} chars); replace_all=true."
+            )
+        else:
+            lbl, _ = per_target_counts[0]
+            summary = (
+                f"surgical_edit: replaced 1 occurrence in {lbl} "
+                f"({len(old_text)} -> {len(new_text)} chars)."
+            )
+            detail = "\n".join(diff_lines)
+
+        return ToolResult(ok=True, summary=summary, detail=detail)
 
 
 # Matches `NAME = <rhs>` at the start of a line (allowing leading whitespace).
@@ -550,6 +774,7 @@ def build_tool_registry() -> dict[str, Tool]:
     instances: list[Tool] = [
         ReadPaperTool(),
         EditSectionTool(),
+        SurgicalEditTool(),
         EditConstantTool(),
         RunCellTool(),
         RegenerateFigureTool(),
@@ -565,6 +790,7 @@ __all__ = [
     "RecompilePdfTool",
     "RegenerateFigureTool",
     "RunCellTool",
+    "SurgicalEditTool",
     "Tool",
     "ToolContext",
     "ToolResult",

@@ -17,7 +17,8 @@ up to 8 turns. Set `done=true` when the user's instruction is satisfied.
 # Tool catalog
 
 - `read_paper(section_title?: str)` — return current paper sections; default returns the full structure (titles + first 200 chars per section).
-- `edit_section(section_title: str, new_body_md: str)` — replace one section's body verbatim. The title is matched exactly. Both paper.md and paper.meta.json get updated.
+- `surgical_edit(old_text: str, new_text: str, replace_all?: bool, section_title?: str)` — find an exact substring `old_text` inside the paper bodies (abstract + sections) and replace it with `new_text`. The anchor MUST appear EXACTLY ONCE in the searched scope, or the call errors with the occurrence count (then widen the anchor or pass `section_title`). Set `replace_all=true` only when you intentionally want every occurrence (e.g. renaming a variable across the whole paper). PREFER this for small/targeted changes — fixing a typo, swapping a citation, tightening a sentence — because it costs O(anchor + replacement) tokens instead of rewriting the whole section.
+- `edit_section(section_title: str, new_body_md: str)` — replace one section's body verbatim. The title is matched exactly. Both paper.md and paper.meta.json get updated. Use this when MORE than ~30% of a section needs to change, or when the structure / paragraph order is being reshuffled. For smaller spot-fixes, use `surgical_edit` instead.
 - `edit_constant(name: str, value: number|str, rerun_cells_from?: int)` — find the `NAME = ...` assignment in the notebook, replace its RHS, and re-execute cells from the given index (default: the cell containing the edit). Use this for numerical tweaks like "set K_R=5000".
 - `run_cell(code: str)` — execute arbitrary Python in the run's persistent kernel; the cell is appended to notebook.ipynb. Use for regenerating figures, running quick checks.
 - `regenerate_figure(figure_id: str, code: str)` — like `run_cell` but also verifies that `figures/<figure_id>.png` was produced. Use when the user asks to redo a specific plot.
@@ -25,9 +26,17 @@ up to 8 turns. Set `done=true` when the user's instruction is satisfied.
 
 # Workflow patterns
 
-- "Tighten the abstract to 500 words": call `read_paper(section_title="Summary")`, see current; call `edit_section("Summary", "<new 500-word version>")`; optionally call `recompile_pdf()`.
-- "Set K_R=5000 and rerun sensitivity": call `read_paper(section_title="Sensitivity Analysis")`; call `edit_constant("K_R", 5000)`; call `regenerate_figure("heatmap_kr_ks_adaptive", "<new code>")` for any affected plots; update Sensitivity section narrative via `edit_section`; `recompile_pdf()`.
-- "The Strengths section is too generic": call `read_paper("Strengths and Weaknesses")` to see current text; call `edit_section` with revised content; `recompile_pdf()`.
+- "Fix the typo `lampery` to `lamprey`": call `surgical_edit(old_text="lampery", new_text="lamprey", replace_all=true)`; `recompile_pdf()`.
+- "Add a citation after the proof in Section 3": call `read_paper("<section 3 title>")` to find the exact sentence; call `surgical_edit(old_text="<the unique trailing sentence of the proof>", new_text="<the same sentence> [CITE: smith2020]", section_title="<section 3 title>")`; `recompile_pdf()`.
+- "Tighten the abstract to 500 words" (whole abstract rewrite): call `read_paper(section_title="Abstract")`; call `edit_section("Abstract", "<new 500-word version>")`; `recompile_pdf()`.
+- "Set K_R=5000 and rerun sensitivity": call `read_paper(section_title="Sensitivity Analysis")`; call `edit_constant("K_R", 5000)`; call `regenerate_figure("heatmap_kr_ks_adaptive", "<new code>")` for any affected plots; update Sensitivity narrative via `surgical_edit` (small touch) or `edit_section` (rewrite); `recompile_pdf()`.
+- "The Strengths section is too generic" (broad rewrite): call `read_paper("Strengths and Weaknesses")`; call `edit_section` with revised content; `recompile_pdf()`.
+
+# Edit-tool choice rule
+
+- DEFAULT to `surgical_edit` for any change that touches less than ~30% of a section. It is dramatically cheaper, only rewrites the lines you care about, and minimises regression risk in untouched paragraphs.
+- ESCALATE to `edit_section` only when you would otherwise need ~3+ `surgical_edit` calls in one section, OR when paragraph order / overall structure is changing.
+- If `surgical_edit` returns "no match", widen the anchor (use a longer surrounding phrase). If it returns "non-unique match (N occurrences)", either lengthen the anchor with more context until it is unique, OR pass `section_title` to narrow the scope, OR pass `replace_all=true` if you really do mean every occurrence.
 
 # Discipline
 
@@ -43,7 +52,7 @@ Each turn, emit exactly:
 ```json
 {
   "reasoning": "brief plan for this turn",
-  "tool": "read_paper" | "edit_section" | "edit_constant" | "run_cell" | "regenerate_figure" | "recompile_pdf",
+  "tool": "read_paper" | "edit_section" | "surgical_edit" | "edit_constant" | "run_cell" | "regenerate_figure" | "recompile_pdf",
   "args": {...},
   "done": false,
   "summary": null

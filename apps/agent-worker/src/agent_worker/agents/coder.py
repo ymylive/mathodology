@@ -35,6 +35,7 @@ from agent_worker.gateway_client import GatewayClient
 from agent_worker.kernel import KernelSession
 from agent_worker.matlab import MatlabSession
 from agent_worker.prompts import load_prompt
+from agent_worker.skills import SkillRegistry, SkillTool
 
 # Iteration budget for the Coder loop. Originally 3 (MVP), bumped to 7 so the
 # agent can produce multiple figures across turns rather than cramming
@@ -72,6 +73,13 @@ class CoderDirective(BaseModel):
     # MatlabSession (matlab -batch in prod, octave --no-gui in dev). State
     # does NOT persist across MATLAB turns — use .mat files for handoff.
     language: Literal["python", "matlab"] = "python"
+    # When set, this turn is a skill-tool lookup instead of an execution.
+    # The agent loop returns the requested skill's body as a synthetic
+    # feedback message and continues without burning an iteration on the
+    # kernel. ``None`` (the default) is the normal execution path; we keep
+    # it optional so prompts that don't enable the skill tool can simply
+    # omit the field.
+    skill_request: str | None = None
 
 
 class CoderAgent:
@@ -90,6 +98,8 @@ class CoderAgent:
         long_context: bool = False,
         model_override: str | None = None,
         matlab_session: MatlabSession | None = None,
+        skill_registry: SkillRegistry | None = None,
+        use_skill_tool: bool = True,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
@@ -101,6 +111,36 @@ class CoderAgent:
         self._run_effort: ReasoningEffort = run_effort
         self._long_context: bool = long_context
         self._model_override: str | None = model_override
+        # Coder is the first agent to opt into the on-demand skill tool —
+        # it has 8+ kernel/MATLAB skills whose bodies would otherwise sit
+        # in the system prompt unused for most turns. Other BaseAgent
+        # subclasses keep ``use_skill_tool=False`` until we have signal
+        # the tool path is safe. The flag still defaults True here so a
+        # caller that wires a registry in gets the new behavior; if no
+        # registry is supplied, the tool stays None and behavior is
+        # identical to the eager-load baseline.
+        self._skill_registry: SkillRegistry | None = skill_registry
+        self._use_skill_tool: bool = use_skill_tool
+        self._skill_tool: SkillTool | None = (
+            SkillTool(skill_registry)
+            if (use_skill_tool and skill_registry is not None and len(skill_registry) > 0)
+            else None
+        )
+
+    def _system_prompt_text(self) -> str:
+        """Coder system prompt with optional on-demand skill menu appended."""
+        base = self.prompt.system["text"]
+        if self._skill_tool is None or self._skill_registry is None:
+            return base
+        menu = self._skill_registry.render_menu()
+        if not menu:
+            return base
+        return f"{base}\n\n{menu}"
+
+    @property
+    def skill_tool(self) -> SkillTool | None:
+        """Expose the bound ``SkillTool`` for tests + the agent loop."""
+        return self._skill_tool
 
     async def run(
         self,
@@ -121,7 +161,7 @@ class CoderAgent:
         figures: list[Figure] = []
         seen_ids: set[str] = set()
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.prompt.system["text"]},
+            {"role": "system", "content": self._system_prompt_text()},
             {
                 "role": "user",
                 "content": self.prompt.render_user(
@@ -148,9 +188,67 @@ class CoderAgent:
         model = self._model_override or self.prompt.model_preference[0]
         final_summary: str | None = None
 
+        # Cap on synthetic skill-tool turns between two real execution turns.
+        # Prevents a runaway loop where the model keeps re-requesting bodies
+        # without making progress; 6 is generous (more than the largest
+        # number of skills any agent could plausibly need in one pass).
+        SKILL_LOOKUP_BUDGET = 6
+
         try:
-            for i in range(max_iterations):
+            i = 0
+            while i < max_iterations:
                 directive = await self._ask_llm(model, messages)
+
+                # ---- skill-tool dispatch (does not consume a code iteration) ----
+                # When the model asks for a skill body, we splice the body
+                # in as a synthetic user-feedback turn and re-ask without
+                # advancing ``i``. The body becomes part of the conversation
+                # transcript for the rest of the loop, so subsequent turns
+                # see it cached in the prompt prefix on every retry.
+                skill_lookups_this_step = 0
+                while (
+                    directive.skill_request
+                    and self._skill_tool is not None
+                    and skill_lookups_this_step < SKILL_LOOKUP_BUDGET
+                ):
+                    skill_lookups_this_step += 1
+                    result = self._skill_tool.handle({"name": directive.skill_request})
+                    await self.emitter.emit(
+                        "log",
+                        {
+                            "level": "info" if result.ok else "warn",
+                            "message": (
+                                f"skill_tool: get_skill({directive.skill_request!r}) "
+                                f"-> {'ok' if result.ok else 'error'} "
+                                f"({len(result.content)} chars)"
+                            ),
+                        },
+                        agent=self.AGENT_NAME,
+                    )
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": json.dumps(directive.model_dump(mode="json")),
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"get_skill({directive.skill_request!r}) result:\n\n"
+                                f"{result.content}\n\n"
+                                "Now produce your next CoderDirective. Set "
+                                "`skill_request` to null and return executable "
+                                "code, OR request another skill if needed."
+                            ),
+                        }
+                    )
+                    directive = await self._ask_llm(model, messages)
+
+                # If the model is still asking for a skill after the budget
+                # is exhausted, fall through and execute whatever code it
+                # supplied (likely empty); this surfaces as a real iteration
+                # so the run can make forward progress instead of looping.
 
                 lang = (directive.language or "python").lower()
                 if lang not in ("python", "matlab"):
@@ -243,6 +341,7 @@ class CoderAgent:
                         "content": self._render_execution_feedback(cell),
                     }
                 )
+                i += 1
             if final_summary is None:
                 final_summary = "Reached iteration limit without explicit done."
 

@@ -12,6 +12,7 @@ import { http } from "@/api/http";
 import { useRunStore } from "@/stores/run";
 import { useI18n } from "@/composables/useI18n";
 import { useCountUp } from "@/composables/useCountUp";
+import { formatCurrency, formatTimeHM } from "@/utils/format";
 import StagePills from "@/components/StagePills.vue";
 import ProblemCard from "@/components/ProblemCard.vue";
 import SettingsPanel from "@/components/SettingsPanel.vue";
@@ -101,13 +102,17 @@ async function cancelRun(): Promise<void> {
 }
 
 // Cancel button is only useful while the pipeline is still in flight.
-// Treat "queued" + "running" as in-flight; anything else (done / failed /
-// future "cancelled") hides the button. Store's RunStatus doesn't yet
-// model "cancelled" — that's a follow-up; the gateway emits done.status =
-// "cancelled" and the audit task persists it to runs.status.
+// "cancelled" is a terminal status (round 7) — once it lands the button
+// disappears alongside done/failed.
 const isInFlight = computed<boolean>(() =>
   run.status === "running" || run.status === "queued"
 );
+
+// "Reconnecting…" chip lives in the header next to the cost. We show it
+// whenever the WS client is between attempts but the run hasn't reached
+// a terminal state. The store mirrors RunWsClient's reconnect decision so
+// this flag is accurate without a separate timer.
+const showReconnect = computed<boolean>(() => run.wsReconnecting);
 
 watch(
   routeRunId,
@@ -151,9 +156,13 @@ async function onPaperUpdated(): Promise<void> {
 
 // --- start a new run from the empty-state form ------------------------------
 async function onStart(payload: { problemText: string }) {
-  // Reset any leftover error / done state from a prior attempt so the guard
-  // in startRun doesn't swallow the new submission.
-  if (run.status === "failed" || run.status === "done") {
+  // Reset any leftover terminal state so the guard in startRun doesn't
+  // swallow the new submission. "cancelled" was added in round 7.
+  if (
+    run.status === "failed" ||
+    run.status === "done" ||
+    run.status === "cancelled"
+  ) {
     run.reset();
   }
   await run.startRun(payload.problemText, {
@@ -190,9 +199,7 @@ const firstLine = computed<string>(() => {
 const startLabel = computed<string>(() => {
   const iso = runRecord.value?.created_at;
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatTimeHM(iso, i18n.lang);
 });
 
 // Tween the header cost so live ¥ updates feel continuous, matching the
@@ -375,7 +382,23 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
                 <T en="started" zh="开始于" /> {{ startLabel }}
               </span>
               <span>·</span>
-              <span>¥ {{ costDisplay.toFixed(3) }}</span>
+              <span>{{ formatCurrency(costDisplay, i18n.lang, 3) }}</span>
+              <span
+                v-if="showReconnect"
+                class="reconnect-pill"
+                role="status"
+                aria-live="polite"
+              >
+                <span class="reconnect-dot" aria-hidden="true"></span>
+                <T en="reconnecting…" zh="正在重连…" />
+              </span>
+              <span
+                v-else-if="run.status === 'cancelled'"
+                class="cancelled-pill"
+                role="status"
+              >
+                <T en="cancelled" zh="已取消" />
+              </span>
             </div>
           </div>
           <div style="display:flex; gap:8px;">
@@ -385,11 +408,27 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
             <button
               v-if="isInFlight"
               class="btn ghost"
+              type="button"
               :disabled="cancelInFlight"
+              :aria-busy="cancelInFlight || undefined"
+              :aria-label="
+                cancelInFlight
+                  ? i18n.t('Cancelling run…', '正在取消运行…')
+                  : i18n.t('Cancel this run', '取消本次运行')
+              "
               @click="cancelRun"
             >
               <span aria-hidden="true">■</span>
-              <T en="Cancel" zh="取消" />
+              <T
+                v-if="!cancelInFlight"
+                en="Cancel"
+                zh="取消"
+              />
+              <T
+                v-else
+                en="Cancelling…"
+                zh="取消中…"
+              />
             </button>
             <RouterLink class="btn hi" :to="{ name: 'workbench' }">
               <span aria-hidden="true">▶</span> <T en="New run" zh="新建运行" />
@@ -536,5 +575,37 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
   font-family: 'Inter', sans-serif;
   font-weight: 600;
   font-size: 12.5px;
+}
+.reconnect-pill,
+.cancelled-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border-radius: 2px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-family: 'JetBrains Mono', monospace;
+}
+.reconnect-pill {
+  border: 1px solid var(--warn, #C77B40);
+  color: #6B3A14;
+  background: #FBEAD6;
+}
+.cancelled-pill {
+  border: 1px solid var(--rule-soft, #D7D2C8);
+  color: var(--ink-3, #5C544A);
+  background: transparent;
+}
+.reconnect-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn, #C77B40);
+  animation: reconnect-pulse 1.1s ease-in-out infinite;
+}
+@keyframes reconnect-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 </style>

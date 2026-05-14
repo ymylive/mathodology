@@ -1,6 +1,6 @@
 """Paper-editor tool catalogue.
 
-Exposes the six tools the PaperEditorAgent dispatches to plus the shared
+Exposes the tools the PaperEditorAgent dispatches to plus the shared
 `ToolContext` / `ToolResult` / `Tool` protocol. See `tools.py` for details.
 """
 
@@ -11,6 +11,7 @@ from agent_worker.editor_tools.tools import (
     RecompilePdfTool,
     RegenerateFigureTool,
     RunCellTool,
+    SurgicalEditTool,
     Tool,
     ToolContext,
     ToolResult,
@@ -24,6 +25,7 @@ __all__ = [
     "RecompilePdfTool",
     "RegenerateFigureTool",
     "RunCellTool",
+    "SurgicalEditTool",
     "Tool",
     "ToolContext",
     "ToolResult",

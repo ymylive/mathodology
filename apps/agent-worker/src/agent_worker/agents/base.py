@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.prompts import load_prompt
+from agent_worker.skills import SkillRegistry, SkillTool
 
 
 class AgentError(Exception):
@@ -41,6 +42,8 @@ class BaseAgent:
         run_effort: ReasoningEffort = "high",
         long_context: bool = False,
         model_override: str | None = None,
+        skill_registry: SkillRegistry | None = None,
+        use_skill_tool: bool = False,
     ) -> None:
         self.gateway = gateway
         self.emitter = emitter
@@ -53,6 +56,40 @@ class BaseAgent:
         # `ProblemInput.model_override`. When set, it wins over the TOML's
         # `model_preference[0]` for every agent in the run.
         self._model_override: str | None = model_override
+        # On-demand skill loading. When `use_skill_tool=True` and the
+        # registry has at least one entry, the system prompt carries the
+        # menu (frontmatter only) and the `get_skill` tool. Default off
+        # so existing eager-load behavior is preserved for every agent
+        # until we have signal that the tool path is safe.
+        self._skill_registry: SkillRegistry | None = skill_registry
+        self._use_skill_tool: bool = use_skill_tool
+        self._skill_tool: SkillTool | None = (
+            SkillTool(skill_registry)
+            if (use_skill_tool and skill_registry is not None and len(skill_registry) > 0)
+            else None
+        )
+
+    def _system_prompt_text(self) -> str:
+        """System prompt text with the on-demand skill menu optionally appended.
+
+        Kept as a method so subclasses (and `Coder`, which doesn't inherit
+        but mirrors the same shape) can share the assembly rule without
+        each one re-implementing the conditional. The menu is appended
+        AFTER the original system text so existing prompt-cache breakpoints
+        still align with the same prefix when the flag is off.
+        """
+        base = self.prompt.system["text"]
+        if self._skill_tool is None or self._skill_registry is None:
+            return base
+        menu = self._skill_registry.render_menu()
+        if not menu:
+            return base
+        return f"{base}\n\n{menu}"
+
+    @property
+    def skill_tool(self) -> SkillTool | None:
+        """The configured ``SkillTool`` instance, or ``None`` when disabled."""
+        return self._skill_tool
 
     async def run(self, **template_vars: Any) -> BaseModel:
         """Emit stage.start, call the LLM (with one parse-retry), emit output + stage.done."""
@@ -72,7 +109,7 @@ class BaseAgent:
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": self.prompt.system["text"],
+                "content": self._system_prompt_text(),
                 "cache_breakpoint": True,
             },
             {"role": "user", "content": self.prompt.render_user(**template_vars)},
@@ -195,7 +232,7 @@ class BaseAgent:
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": self.prompt.system["text"],
+                "content": self._system_prompt_text(),
                 "cache_breakpoint": True,
             },
             {

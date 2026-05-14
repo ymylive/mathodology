@@ -104,6 +104,21 @@ class SkillRegistry:
             lines.append(f"- {s.name}: {desc}")
         return "\n".join(lines)
 
+    def render_menu(self, language: str = "en") -> str:
+        """Render the on-demand-tool menu (frontmatter only — no bodies).
+
+        Differs from :meth:`index_summary` by surfacing ``when_to_use``
+        triggers, which the model needs to decide *whether* to invoke
+        ``get_skill``. The body is intentionally omitted; that is what
+        the tool returns. Implementation lives in
+        ``agent_worker.skills.tool.render_skill_menu`` to avoid a circular
+        import — this method is a thin re-export so callers can stay on
+        the ``SkillRegistry`` surface.
+        """
+        from agent_worker.skills.tool import render_skill_menu
+
+        return render_skill_menu(self, language=language)
+
 
 # ----------------------------------------------------------- frontmatter parsing
 

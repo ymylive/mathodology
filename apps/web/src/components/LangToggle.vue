@@ -9,6 +9,7 @@ const i18n = useI18n();
     <button
       type="button"
       :class="{ on: i18n.lang === 'en' }"
+      :aria-pressed="i18n.lang === 'en'"
       @click="i18n.toggle('en')"
     >
       EN
@@ -16,6 +17,7 @@ const i18n = useI18n();
     <button
       type="button"
       :class="{ on: i18n.lang === 'zh' }"
+      :aria-pressed="i18n.lang === 'zh'"
       @click="i18n.toggle('zh')"
     >
       中文

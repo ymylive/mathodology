@@ -4,7 +4,13 @@ import { http, devAuthToken } from "@/api/http";
 import { RunWsClient } from "@/api/ws";
 import { useFinetuneStore, isFinetuneKind } from "@/stores/finetune";
 
-export type RunStatus = "idle" | "queued" | "running" | "done" | "failed";
+export type RunStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled";
 
 interface RunCreated {
   run_id: string;
@@ -56,6 +62,9 @@ interface State {
   error: string | null;
   costRmb: number;
   wsConnected: boolean;
+  // True while the WS client is between attempts (closed but going to retry).
+  // Distinct from `!wsConnected` which can also mean "terminal / never opened".
+  wsReconnecting: boolean;
   tokens: Record<string, AgentStream>;
   usage: Record<string, AgentUsage>;
   outputs: Record<string, AgentOutput>;
@@ -106,6 +115,7 @@ export const useRunStore = defineStore("run", {
     error: null,
     costRmb: 0,
     wsConnected: false,
+    wsReconnecting: false,
     tokens: {},
     usage: {},
     outputs: {},
@@ -141,6 +151,7 @@ export const useRunStore = defineStore("run", {
       this.error = null;
       this.costRmb = 0;
       this.wsConnected = false;
+      this.wsReconnecting = false;
       this.tokens = {};
       this.usage = {};
       this.outputs = {};
@@ -197,10 +208,22 @@ export const useRunStore = defineStore("run", {
         handlers: {
           onOpen: () => {
             this.wsConnected = true;
+            this.wsReconnecting = false;
             if (this.status === "queued") this.status = "running";
           },
-          onClose: () => {
+          onClose: (ev) => {
             this.wsConnected = false;
+            // The RunWsClient already decides whether to attempt a reconnect
+            // (closedByUser, terminal, code 1000 → no retry). We mirror its
+            // rule here so the UI only shows "reconnecting" when one is
+            // actually scheduled. The terminal `done` event flips status
+            // and clears this on the next tick.
+            const willRetry =
+              ev.code !== 1000 &&
+              this.status !== "done" &&
+              this.status !== "failed" &&
+              this.status !== "cancelled";
+            this.wsReconnecting = willRetry;
           },
           onError: () => {
             this.wsConnected = false;
@@ -412,7 +435,16 @@ export const useRunStore = defineStore("run", {
             this.kernelCells[idx] = { ...existing, doneTs: ev.ts };
           }
         }
-        this.status = p.status === "failed" ? "failed" : "done";
+        // Three distinct terminal statuses. `cancelled` was added in round 7
+        // (gateway-signalled mid-run cancel). Treat anything unrecognized as
+        // `done` to stay forward-compatible with any future success label.
+        this.status =
+          p.status === "failed"
+            ? "failed"
+            : p.status === "cancelled"
+              ? "cancelled"
+              : "done";
+        this.wsReconnecting = false;
         return;
       }
     },

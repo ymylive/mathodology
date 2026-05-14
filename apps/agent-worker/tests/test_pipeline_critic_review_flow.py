@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -10,6 +11,12 @@ from agent_worker.pipeline import (
     _searcher_review_criteria,
 )
 from mm_contracts import AnalyzerOutput, ApproachSketch, CritiqueFinding, CritiqueReport
+
+# Round-7: the default CriticPolicy caps analyzer at 1 revision round. These
+# flow tests target_agent="analyzer" but are testing the policy MECHANISM
+# (does the loop honor max_revision_rounds=2?), not the analyzer-specific
+# cap, so we disable the per-stage overrides for them.
+_NO_OVERRIDES: MappingProxyType[str, int] = MappingProxyType({})
 
 
 class _FakeProducer:
@@ -147,7 +154,11 @@ async def test_review_and_maybe_revise_allows_two_revision_rounds() -> None:
         output=original,
         context={"problem_text": "Estimate demand and optimize allocation."},
         criteria=["covers all sub-questions"],
-        policy=CriticPolicy(max_revision_rounds=2),
+        policy=CriticPolicy(
+            max_revision_rounds=2,
+            max_revision_rounds_overrides=_NO_OVERRIDES,
+            max_revision_cost_rmb=10.0,
+        ),
     )
 
     assert result is second_revision
@@ -187,7 +198,11 @@ async def test_review_and_maybe_revise_stops_when_cost_budget_is_exhausted() -> 
         output=original,
         context={"problem_text": "Estimate demand and optimize allocation."},
         criteria=["covers all sub-questions"],
-        policy=CriticPolicy(max_revision_rounds=2, max_revision_cost_rmb=0.04),
+        policy=CriticPolicy(
+            max_revision_rounds=2,
+            max_revision_cost_rmb=0.04,
+            max_revision_rounds_overrides=_NO_OVERRIDES,
+        ),
         estimated_review_cost_rmb=0.01,
         estimated_revision_cost_rmb=0.02,
     )
@@ -221,7 +236,11 @@ async def test_review_and_maybe_revise_fails_after_budget_with_blocking() -> Non
             output=original,
             context={"problem_text": "Estimate demand and optimize allocation."},
             criteria=["covers all sub-questions"],
-            policy=CriticPolicy(max_revision_rounds=2),
+            policy=CriticPolicy(
+                max_revision_rounds=2,
+                max_revision_rounds_overrides=_NO_OVERRIDES,
+                max_revision_cost_rmb=10.0,
+            ),
         )
 
     assert producer.revision_calls == 2

@@ -19,6 +19,16 @@ use crate::llm::stream::next_seq;
 /// Stream MAXLEN for `mm:events:<run_id>`. Matches worker emitter.
 const EVENTS_MAXLEN: usize = 5000;
 
+/// Redis key that holds the per-run running cost total in RMB. Mirrors
+/// `runs.cost_rmb` in Postgres so consumers (e.g. the Python worker's
+/// Critic budget tracker) can query the authoritative running total
+/// without a database round-trip. INCRBYFLOAT'd on every chargeable LLM
+/// call. Caller is expected to set TTL externally if cleanup is desired;
+/// keys are small and bounded by the run lifecycle.
+pub fn cost_key(run_id: &Uuid) -> String {
+    format!("mm:cost:{run_id}")
+}
+
 pub fn compute_cost_rmb(price: Price, usage: &Usage) -> f64 {
     (usage.prompt_tokens as f64 / 1_000_000.0) * price.input_per_1m
         + (usage.completion_tokens as f64 / 1_000_000.0) * price.output_per_1m
@@ -90,6 +100,17 @@ pub async fn record_completion_cost(
         .fetch_one(pg)
         .await?;
         let run_total: f64 = row.0.parse().unwrap_or(0.0);
+
+        // Mirror the running total into Redis so consumers (Critic budget
+        // tracker) can read the authoritative value without a Postgres
+        // round-trip. We use INCRBYFLOAT with `delta` rather than SET
+        // `run_total` so concurrent calls accumulate correctly even if
+        // ordered differently with respect to the Postgres UPDATE. A 0.0
+        // delta is fine (no-op net) and we still call it so the key
+        // exists eagerly for the run.
+        let cost_redis_key = cost_key(&rid);
+        let _: redis::RedisResult<f64> =
+            redis.incr(cost_redis_key, delta).await;
 
         // XADD kind=cost event to the run stream. Seq from shared counter.
         let seq = next_seq(redis, &rid).await?;

@@ -19,6 +19,9 @@ from mm_contracts import (
     SearchFindings,
 )
 
+from agent_worker.agents._common import (
+    problem_letter_from_problem_text as _problem_letter_from_problem_text,
+)
 from agent_worker.agents.base import BaseAgent
 from agent_worker.events import EventEmitter
 from agent_worker.few_shot import FewShotLibrary, format_writer_block, get_default_library
@@ -44,18 +47,6 @@ def _writer_language(competition_type: str) -> str:
     if "华数" in (competition_type or ""):
         return "zh"
     return "en"
-
-
-def _problem_letter_from_problem_text(problem_text: str) -> str | None:
-    """Best-effort: detect MCM/ICM problem letter from the prompt header."""
-    import re
-
-    if not problem_text:
-        return None
-    m = re.search(r"Problem\s+([A-F])\b", problem_text, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    return None
 
 
 class WriterAgent(BaseAgent):
@@ -143,10 +134,12 @@ class WriterAgent(BaseAgent):
                 else coder_output.figure_paths,
                 ensure_ascii=False,
             ),
+            # Source removed in round-7 cost optimization — Writer doesn't need
+            # the code, only the outputs. Saves ~30% of Writer prompt input.
             coder_cells=json.dumps(
                 [
                     {
-                        "source": c.source,
+                        "index": c.index,
                         "stdout": c.stdout[:500],
                         "result": c.result_text,
                     }

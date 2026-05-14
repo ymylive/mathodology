@@ -17,6 +17,28 @@ pub struct ChatMessage {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Mark this message as an Anthropic prompt-cache break point.
+    ///
+    /// Anthropic's `/v1/messages` accepts `cache_control: { type: "ephemeral" }`
+    /// on individual content blocks; the API caches the entire prefix up to
+    /// (and including) the marked block. Anthropic allows up to 4 breakpoints
+    /// per request, but v1 of this wiring uses exactly one — typically the
+    /// system message, which is the largest stable prefix.
+    ///
+    /// Adapters translate per provider:
+    /// - `anthropic`: serializes the message with `content` as a 1-element
+    ///   text-block array carrying `cache_control: {type: "ephemeral"}` on
+    ///   the block. For the system role, the lifted `system` field becomes
+    ///   an array of system blocks with the same marker.
+    /// - `openai_compat`: passes `cache_control: {type: "ephemeral"}` through
+    ///   as an extra message-level key. Upstream Claude-backed proxies (e.g.
+    ///   cornna's `cdnapi.cornna.xyz`) may honour it; other shops ignore it
+    ///   silently — the field is unknown but harmless.
+    ///
+    /// Defaults to `false` and is omitted from the serialized JSON in that
+    /// case so the on-the-wire shape is unchanged for non-cache callers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cache_breakpoint: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -124,11 +124,13 @@ mod tests {
                     role: "system".into(),
                     content: "you are helpful".into(),
                     name: None,
+                    cache_breakpoint: false,
                 },
                 ChatMessage {
                     role: "user".into(),
                     content: "hello".into(),
                     name: None,
+                    cache_breakpoint: false,
                 },
             ],
             temperature: Some(0.2),

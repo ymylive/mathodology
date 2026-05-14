@@ -83,6 +83,32 @@ async function loadRunRecord(id: string) {
   }
 }
 
+// Mid-run cancellation. POST /runs/:id/cancel writes a Redis flag the
+// worker polls between stages; the user sees status flip to "cancelled"
+// once the current stage finishes (worst case ~2 min latency for a
+// streaming LLM call to return). Idempotent — clicking twice is a no-op.
+const cancelInFlight = ref(false);
+async function cancelRun(): Promise<void> {
+  if (!routeRunId.value) return;
+  cancelInFlight.value = true;
+  try {
+    await http.post(`/runs/${routeRunId.value}/cancel`, {});
+  } catch (err) {
+    console.error("[Workbench] cancel POST failed", err);
+  } finally {
+    cancelInFlight.value = false;
+  }
+}
+
+// Cancel button is only useful while the pipeline is still in flight.
+// Treat "queued" + "running" as in-flight; anything else (done / failed /
+// future "cancelled") hides the button. Store's RunStatus doesn't yet
+// model "cancelled" — that's a follow-up; the gateway emits done.status =
+// "cancelled" and the audit task persists it to runs.status.
+const isInFlight = computed<boolean>(() =>
+  run.status === "running" || run.status === "queued"
+);
+
 watch(
   routeRunId,
   (next, prev) => {
@@ -353,9 +379,18 @@ function agentTitle(agent: string): { en: string; zh: string; num: string } {
             </div>
           </div>
           <div style="display:flex; gap:8px;">
-            <!-- Pause button removed in round-6 UX pass: it was disabled
-                 with only a tooltip explanation (Agent C #5). Replace with
-                 a real Cancel route once the backend exposes one. -->
+            <!-- Real Cancel button (round-7): POSTs /runs/:id/cancel which
+                 writes mm:cancel:<run_id>=1; worker halts at next stage
+                 boundary. Hidden once the run is in a terminal state. -->
+            <button
+              v-if="isInFlight"
+              class="btn ghost"
+              :disabled="cancelInFlight"
+              @click="cancelRun"
+            >
+              <span aria-hidden="true">■</span>
+              <T en="Cancel" zh="取消" />
+            </button>
             <RouterLink class="btn hi" :to="{ name: 'workbench' }">
               <span aria-hidden="true">▶</span> <T en="New run" zh="新建运行" />
             </RouterLink>

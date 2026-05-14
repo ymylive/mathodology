@@ -261,6 +261,18 @@ components:
         role: { type: string, enum: [system, user, assistant, tool] }
         content: { type: string }
         name: { type: string }
+        cache_breakpoint:
+          type: boolean
+          default: false
+          description: |
+            Mark this message as an Anthropic prompt-cache break point. When
+            true, the gateway emits `cache_control: { "type": "ephemeral" }`
+            on the message (Anthropic native: as a content-block attribute;
+            OpenAI-compat: as an extra message-level key for Claude-backed
+            proxies). The cached prefix runs from the start of the request
+            through this message; Anthropic supports up to 4 breakpoints per
+            request, but v1 of this wiring uses exactly one. Silently
+            ignored by providers that don't support prompt caching.
 
     ChatCompletionResponse:
       type: object

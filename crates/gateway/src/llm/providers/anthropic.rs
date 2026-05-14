@@ -12,7 +12,14 @@
 //! a new stable version and re-verify the SSE event names).
 //!
 //! Intentionally out of scope for M8: tool use / function calling, image /
-//! vision content blocks, prompt caching directives, extended thinking.
+//! vision content blocks, extended thinking.
+//!
+//! Prompt caching: when a `ChatMessage` sets `cache_breakpoint = true`, the
+//! adapter emits `cache_control: { type: "ephemeral" }` on the final content
+//! block of that message (or on the system content array, for the system
+//! role). Anthropic caches the prefix up to that breakpoint; one breakpoint
+//! per request is enough to cache the large stable prefix (system prompt +
+//! few-shot exemplars). Multi-breakpoint support is intentionally deferred.
 
 use std::sync::Arc;
 
@@ -86,11 +93,33 @@ impl AnthropicAdapter {
     ///   the system prompt telling the model to emit JSON only. Future
     ///   schemas (e.g. `json_schema`) would need their own handling.
     fn build_body(&self, req: &CanonicalRequest, stream: bool) -> Value {
+        // Track whether any system message asked to be a cache breakpoint. We
+        // need to know this BEFORE we know whether `response_format` will
+        // append the JSON suffix, so cache_control attaches to the final
+        // system content block in either case.
         let mut system_parts: Vec<String> = Vec::new();
+        let mut system_has_cache_breakpoint = false;
         let mut messages: Vec<Value> = Vec::with_capacity(req.messages.len());
         for m in &req.messages {
             if m.role == "system" {
                 system_parts.push(m.content.clone());
+                if m.cache_breakpoint {
+                    system_has_cache_breakpoint = true;
+                }
+            } else if m.cache_breakpoint {
+                // Anthropic's prompt cache reads `cache_control` only off
+                // content blocks, so we have to upgrade `content` from a
+                // bare string into a 1-element text-block array with the
+                // marker on it. The cache prefix runs from the start of the
+                // request up to and including this block.
+                messages.push(json!({
+                    "role": m.role,
+                    "content": [{
+                        "type": "text",
+                        "text": m.content,
+                        "cache_control": { "type": "ephemeral" },
+                    }],
+                }));
             } else {
                 messages.push(json!({
                     "role": m.role,
@@ -145,7 +174,20 @@ impl AnthropicAdapter {
             "stream": stream,
         });
         if !system.is_empty() {
-            body["system"] = json!(system);
+            if system_has_cache_breakpoint {
+                // System-level cache_control: Anthropic accepts `system` as
+                // either a bare string OR an array of content blocks. We use
+                // the array form so the final block can carry the ephemeral
+                // marker, caching the whole system prompt (the biggest stable
+                // prefix in most agent calls).
+                body["system"] = json!([{
+                    "type": "text",
+                    "text": system,
+                    "cache_control": { "type": "ephemeral" },
+                }]);
+            } else {
+                body["system"] = json!(system);
+            }
         }
         if let Some(t) = req.temperature {
             body["temperature"] = json!(t);
@@ -490,6 +532,7 @@ mod tests {
                     role: r.into(),
                     content: c.into(),
                     name: None,
+                    cache_breakpoint: false,
                 })
                 .collect(),
             temperature: Some(0.2),
@@ -715,5 +758,123 @@ mod tests {
         )
         .unwrap()
         .is_none());
+    }
+
+    /// `cache_breakpoint = true` on a system message must promote the
+    /// top-level `system` field from a bare string to an array of content
+    /// blocks with `cache_control: { type: "ephemeral" }` on the final
+    /// (only) block. This is the shape Anthropic's prompt cache reads.
+    #[test]
+    fn build_body_emits_cache_control_on_system_breakpoint() {
+        let adapter = AnthropicAdapter::new(
+            "anth".into(),
+            "https://api.anthropic.com".into(),
+            "sk".into(),
+            vec!["claude-sonnet-4-6".into()],
+            Client::new(),
+        );
+        let req = CanonicalRequest {
+            model: "claude-sonnet-4-6".into(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".into(),
+                    content: "big stable system prompt".into(),
+                    name: None,
+                    cache_breakpoint: true,
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: "go".into(),
+                    name: None,
+                    cache_breakpoint: false,
+                },
+            ],
+            temperature: None,
+            max_tokens: None,
+            stream: false,
+            response_format: None,
+            reasoning_effort: None,
+        };
+        let body = adapter.build_body(&req, false);
+
+        let system = body
+            .get("system")
+            .expect("system field present when system messages exist");
+        let arr = system
+            .as_array()
+            .expect("system must be an array of content blocks when a breakpoint is set");
+        assert_eq!(arr.len(), 1, "single stable system block");
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[0]["text"], "big stable system prompt");
+        assert_eq!(
+            arr[0]["cache_control"]["type"], "ephemeral",
+            "ephemeral cache_control marks the prefix boundary"
+        );
+
+        // The user message stays a plain string — no breakpoint requested.
+        let msgs = body["messages"].as_array().expect("messages array");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["content"], "go");
+    }
+
+    /// When a non-system message is marked as the breakpoint, its `content`
+    /// must be promoted to a 1-element text-block array with `cache_control`.
+    #[test]
+    fn build_body_emits_cache_control_on_user_breakpoint() {
+        let adapter = AnthropicAdapter::new(
+            "anth".into(),
+            "https://api.anthropic.com".into(),
+            "sk".into(),
+            vec!["claude-sonnet-4-6".into()],
+            Client::new(),
+        );
+        let req = CanonicalRequest {
+            model: "claude-sonnet-4-6".into(),
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "shared stable prefix...".into(),
+                name: None,
+                cache_breakpoint: true,
+            }],
+            temperature: None,
+            max_tokens: None,
+            stream: false,
+            response_format: None,
+            reasoning_effort: None,
+        };
+        let body = adapter.build_body(&req, false);
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        let content = msgs[0]["content"]
+            .as_array()
+            .expect("breakpoint message content is a block array");
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "shared stable prefix...");
+        assert_eq!(content[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    /// Without any `cache_breakpoint` markers, the on-the-wire body must be
+    /// byte-identical to the pre-caching shape: bare-string `system` and
+    /// bare-string message content. This keeps the change zero-risk for
+    /// callers that don't opt into caching.
+    #[test]
+    fn build_body_unchanged_without_breakpoint() {
+        let adapter = AnthropicAdapter::new(
+            "anth".into(),
+            "https://x".into(),
+            "k".into(),
+            vec!["claude-sonnet-4-6".into()],
+            Client::new(),
+        );
+        let req = mk_req_with(vec![("system", "be brief"), ("user", "go")]);
+        let body = adapter.build_body(&req, false);
+        assert_eq!(
+            body["system"].as_str(),
+            Some("be brief"),
+            "system stays a bare string when no breakpoint is set"
+        );
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs[0]["content"].as_str(), Some("go"));
     }
 }

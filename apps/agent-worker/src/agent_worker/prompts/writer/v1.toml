@@ -149,7 +149,7 @@ Coder final summary:
 Available figures from the Coder (JSON array; each has id, caption, path_png, path_svg, width). Reference them in sections with `[[FIG:<id>]]` on its own line:
 {{ coder_figures }}
 
-Coder executed cells (JSON array; each has source, stdout[:500], result):
+Coder executed cells (JSON array; each has index, stdout[:500], result):
 {{ coder_cells }}
 
 Searcher findings (JSON; may be empty):

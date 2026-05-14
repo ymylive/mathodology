@@ -15,12 +15,35 @@ from mm_contracts import AnalyzerOutput, ModelSpec, ProblemInput, ReasoningEffor
 
 from agent_worker.agents.base import BaseAgent
 from agent_worker.events import EventEmitter
+from agent_worker.few_shot import FewShotLibrary, format_writer_block, get_default_library
 from agent_worker.gateway_client import GatewayClient
 
 if TYPE_CHECKING:
     from mm_contracts import MethodNode
 
     from agent_worker.hmml import HMMLService
+
+# Modeler benefits from seeing >1 prior approach to anchor its own
+# "compare 2 candidates" rule, but keep this lean to preserve token budget.
+MODELER_FEW_SHOT_K = 2
+
+_ZH_FAMILIES = {"cumcm", "huashu", "国赛"}
+
+
+def _modeler_language(competition_type: str) -> str:
+    s = (competition_type or "").lower()
+    if any(token in s for token in _ZH_FAMILIES) or "华数" in (competition_type or ""):
+        return "zh"
+    return "en"
+
+
+def _problem_letter_from_problem_text(problem_text: str) -> str | None:
+    import re
+
+    if not problem_text:
+        return None
+    m = re.search(r"Problem\s+([A-F])\b", problem_text, flags=re.IGNORECASE)
+    return m.group(1).upper() if m else None
 
 
 class ModelerAgent(BaseAgent):
@@ -38,6 +61,7 @@ class ModelerAgent(BaseAgent):
         run_effort: ReasoningEffort = "medium",
         long_context: bool = False,
         model_override: str | None = None,
+        few_shot_library: FewShotLibrary | None = None,
     ) -> None:
         super().__init__(
             gateway,
@@ -48,6 +72,11 @@ class ModelerAgent(BaseAgent):
             model_override=model_override,
         )
         self.hmml = hmml
+        self._few_shot: FewShotLibrary = (
+            few_shot_library
+            if few_shot_library is not None
+            else get_default_library()
+        )
 
     async def run_for(
         self, problem: ProblemInput, analysis: AnalyzerOutput
@@ -75,6 +104,19 @@ class ModelerAgent(BaseAgent):
                 )
 
         retrieved_ctx = self._render_retrieved(retrieved)
+        # Same-problem-type winning-paper exemplars — gives the LLM concrete
+        # anchor patterns for "chosen approach + rationale" that judges have
+        # historically rewarded. Missing index → empty block, silent fallback.
+        language = _modeler_language(problem.competition_type)
+        letter = _problem_letter_from_problem_text(problem.problem_text)
+        few_shot_block = format_writer_block(
+            self._few_shot.top_k(
+                competition_type=problem.competition_type,
+                problem_letter=letter,
+                k=MODELER_FEW_SHOT_K,
+            ),
+            language=language,
+        )
         output = await self.run(
             problem_text=problem.problem_text,
             competition_type=problem.competition_type,
@@ -82,6 +124,7 @@ class ModelerAgent(BaseAgent):
                 analysis.model_dump(mode="json"), ensure_ascii=False, indent=2
             ),
             retrieved_methods=retrieved_ctx,
+            few_shot_exemplars=few_shot_block,
         )
         assert isinstance(output, ModelSpec)
         return output

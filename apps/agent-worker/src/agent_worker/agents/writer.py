@@ -21,12 +21,41 @@ from mm_contracts import (
 
 from agent_worker.agents.base import BaseAgent
 from agent_worker.events import EventEmitter
+from agent_worker.few_shot import FewShotLibrary, format_writer_block, get_default_library
 from agent_worker.gateway_client import GatewayClient
 
 # Per-paper Writer-side budget. Last-resort safety net: Searcher already
 # compacts files > 24k chars in Phase 3.6, but uncompacted survivors get
 # truncated here at a paragraph boundary so the prompt cannot explode.
 WRITER_SOFT_TRUNCATE_CHARS = 32_000
+
+# How many same-problem-type exemplars to inject into the Writer prompt.
+# 2 is a good trade-off: enough variety to anchor structure, not so many
+# that we blow past token_budget_in or risk style copying.
+WRITER_FEW_SHOT_K = 2
+
+_ZH_FAMILIES = {"cumcm", "huashu", "国赛"}
+
+
+def _writer_language(competition_type: str) -> str:
+    s = (competition_type or "").lower()
+    if any(token in s for token in _ZH_FAMILIES):
+        return "zh"
+    if "华数" in (competition_type or ""):
+        return "zh"
+    return "en"
+
+
+def _problem_letter_from_problem_text(problem_text: str) -> str | None:
+    """Best-effort: detect MCM/ICM problem letter from the prompt header."""
+    import re
+
+    if not problem_text:
+        return None
+    m = re.search(r"Problem\s+([A-F])\b", problem_text, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    return None
 
 
 class WriterAgent(BaseAgent):
@@ -44,6 +73,7 @@ class WriterAgent(BaseAgent):
         long_context: bool = False,
         model_override: str | None = None,
         run_dir: Path | None = None,
+        few_shot_library: FewShotLibrary | None = None,
     ) -> None:
         super().__init__(
             gateway,
@@ -57,6 +87,13 @@ class WriterAgent(BaseAgent):
         # paths from `SearchFindings.paper_fulltext_paths`. Optional so
         # existing callers / tests that don't pass it still work.
         self._run_dir: Path | None = run_dir
+        # Process-singleton few-shot library by default. Tests can inject a
+        # custom one (e.g. an empty library) to keep prompts deterministic.
+        self._few_shot: FewShotLibrary = (
+            few_shot_library
+            if few_shot_library is not None
+            else get_default_library()
+        )
 
     async def run_for(
         self,
@@ -74,6 +111,17 @@ class WriterAgent(BaseAgent):
             else {"queries": [], "papers": [], "key_findings": [], "datasets_mentioned": []}
         )
         fulltexts_block = self._build_fulltexts_block(findings)
+        # Award-winning exemplars: top-K winning-paper Summary excerpts from
+        # the same competition family + problem letter. Empty when the index
+        # isn't built yet — Writer falls back to its baseline behaviour.
+        language = _writer_language(problem.competition_type)
+        letter = _problem_letter_from_problem_text(problem.problem_text)
+        exemplars = self._few_shot.top_k(
+            competition_type=problem.competition_type,
+            problem_letter=letter,
+            k=WRITER_FEW_SHOT_K,
+        )
+        few_shot_block = format_writer_block(exemplars, language=language)
         output = await self.run(
             problem_text=problem.problem_text,
             competition_type=problem.competition_type,
@@ -110,6 +158,7 @@ class WriterAgent(BaseAgent):
                 findings_payload, ensure_ascii=False, indent=2
             ),
             paper_fulltexts=fulltexts_block,
+            few_shot_exemplars=few_shot_block,
         )
         assert isinstance(output, PaperDraft)
         return output

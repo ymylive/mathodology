@@ -36,6 +36,15 @@ Pick the simplest model that can answer the question. Only escalate (LP → MILP
 ## HMML method consultation
 You have access to a reference library (HMML). You will see the top 5 retrieved methods. For each retrieved method, evaluate its fit and include an entry in `consulted_methods` with `{id, name, reason}`. The `reason` is short: "selected as primary", "considered but inferior because <specific reason>", or "partial basis for hybrid approach". You do NOT have to pick from the retrieved set — if none fit, state so in the reason and propose your own approach.
 
+## Same-problem-type award-paper exemplars (style + approach reference)
+
+If the user message includes `few_shot_exemplars`, those are Summary excerpts from past O 奖 / F 奖 / 一等奖 papers on the same problem letter. Use them to:
+- Calibrate the **depth** of your `rationale` (judges expect 1-2 paragraphs comparing candidates, not 1 sentence).
+- See which kinds of models judges have historically rewarded for this problem family (e.g. Problem A frequently rewards continuous/PDE; Problem C rewards data-driven + interpretable; ICM E rewards system-dynamics).
+- Set your sensitivity-plan ambition (most prize papers do ≥3 parameters + Monte Carlo).
+
+**DO NOT copy their `chosen_approach` text or numbers.** Use them as anchors, not source.
+
 Respond with a single JSON object matching ModelSpec. Use ensure_ascii=False for any Chinese text. No markdown fences.
 """
 
@@ -51,6 +60,9 @@ Analyzer output (JSON):
 
 Retrieved methods from HMML (top 5 by BM25 relevance):
 {{ retrieved_methods }}
+
+Same-problem-type award-paper exemplars (structure reference, do NOT copy):
+{{ few_shot_exemplars }}
 
 Respond with a JSON object. Required top-level keys:
   chosen_approach (string),

@@ -51,6 +51,12 @@ from agent_worker.agents import (
     SearcherAgent,
     WriterAgent,
 )
+from agent_worker.agents.evidence import (
+    anonymity_criteria,
+    mine_sensitivity_evidence,
+    scan_anonymity_violations,
+    sensitivity_criteria,
+)
 from agent_worker.config import get_settings
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
@@ -379,6 +385,42 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             paper = await writer.run_for(
                 problem, analysis, spec, coder_out, findings
             )
+
+            # Deterministic evidence mining: surface concrete facts about the
+            # Writer's own output before the LLM Critic sees it. Two scanners:
+            # - sensitivity: ≥3 parameters perturbed at ±N% (F/O-prize bar)
+            # - anonymity: school/region/author names (MCM/CUMCM instant DQ)
+            # Findings turn into extra criteria so the Critic + revision loop
+            # gets pointed at real flaws rather than hallucinated ones.
+            base_writer_criteria = [
+                "Abstract follows award-mode numeric-result rules.",
+                "Every problem sub-question is answered explicitly.",
+                "Sensitivity analysis and strengths/weaknesses are present when applicable.",
+                "References are sufficient and cited in the body.",
+                "Figures are referenced using known figure ids and discussed with numbers.",
+                "No school, student, or identifying team information appears.",
+            ]
+            sens_findings = mine_sensitivity_evidence(paper)
+            anon_findings = scan_anonymity_violations(paper)
+            extra_criteria = sensitivity_criteria(sens_findings) + anonymity_criteria(
+                anon_findings
+            )
+            if extra_criteria:
+                await emitter.emit(
+                    "log",
+                    {
+                        "level": "warning" if anon_findings.has_violations else "info",
+                        "message": (
+                            "deterministic Writer scan flagged "
+                            f"{len(extra_criteria)} issue(s): "
+                            f"sensitivity_params={sens_findings.parameter_count_estimate}, "
+                            f"perturb_mentions={sens_findings.perturb_mention_count}, "
+                            f"anonymity_hits={len(anon_findings.violations)}"
+                        ),
+                    },
+                    agent="writer",
+                )
+
             paper = await _review_and_maybe_revise(
                 critic=critic,
                 producer=writer,
@@ -391,15 +433,20 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                     "spec": spec.model_dump(mode="json"),
                     "coder_output": coder_out.model_dump(mode="json"),
                     "search_findings": findings.model_dump(mode="json"),
+                    "evidence_scan": {
+                        "sensitivity": {
+                            "has_section": sens_findings.has_sensitivity_section,
+                            "parameter_count_estimate": sens_findings.parameter_count_estimate,
+                            "perturb_mentions": sens_findings.perturb_mention_count,
+                            "tornado_or_mc_referenced": sens_findings.tornado_or_mc_referenced,
+                        },
+                        "anonymity_violations": [
+                            {"location": loc, "snippet": snip}
+                            for loc, snip in anon_findings.violations
+                        ],
+                    },
                 },
-                criteria=[
-                    "Abstract follows award-mode numeric-result rules.",
-                    "Every problem sub-question is answered explicitly.",
-                    "Sensitivity analysis and strengths/weaknesses are present when applicable.",
-                    "References are sufficient and cited in the body.",
-                    "Figures are referenced using known figure ids and discussed with numbers.",
-                    "No school, student, or identifying team information appears.",
-                ],
+                criteria=base_writer_criteria + extra_criteria,
             )
             assert isinstance(paper, PaperDraft)
 

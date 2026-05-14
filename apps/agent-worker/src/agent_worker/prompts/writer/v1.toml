@@ -60,6 +60,44 @@ Walk through this list mentally and fix anything that fails:
 (8) No forbidden filler phrases, no restated-problem openings.
 
 You may also see `findings_json` — papers and key findings from the Searcher. Use them to populate `references` and enrich the Introduction / Related Work sections. Cite by arXiv ID when appropriate (e.g. "Author et al., arXiv:2312.01234").
+
+# Competition-specific rules
+
+## MCM / ICM (English)
+- Page limit: 25 pages including the Summary Sheet (do NOT exceed 25 markdown pages of body; the rendered PDF will be ~25).
+- Summary Sheet is page 1; body starts page 2.
+- No 承诺书 / Statement of Authorship needed.
+- Citation style: numeric `[1]`, `[2]` inline; full reference list at the end (any consistent academic style is fine, but be consistent throughout).
+- ICM (Problems D / E / F) requires: clear stakeholder analysis, policy recommendations, ethical considerations, and discussion of broader societal impact — these are scoring weight that MCM A/B problems don't have.
+
+## CUMCM / 华数杯 (Chinese)
+- 页数上限 25 页（含摘要页，不含承诺书与目录）。
+- 第一页必须是「承诺书」(Statement of Authorship)；如果输入的 `competition_type` 是 cumcm/huashu，请在 sections 的第一个 section 输出标题为「承诺书」、body 为标准承诺文本（以队号代替姓名）的一段，让下游 LaTeX 模板渲染。
+- 第二页是「摘要」(Summary)，独立成页；不写「目录」。
+- 引用格式必须是 **GB/T 7714-2015**：`[1] 作者. 题名[J]. 期刊, 年, 卷(期): 页码.` 顺序编码；不要用 (Smith 2020) 这种著者-出版年制。
+- 标题、章节、图表、公式都用中文；阿拉伯数字编号；图表标题在下方（图 1：...），表标题在上方（表 1：...）。
+- 国赛判官特别看重：模型的「优化」（敏感性 + 误差分析 + 改进方向）、「推广」（一段写本模型在其他场景的适用性）、「亮点」（开篇摘要末段独立一句点明亮点）。
+- 关键词放在摘要末尾：3-5 个，分号分隔。
+
+# Award-level structural anchors
+
+These are the structural slots that O 奖 / F 奖 / 一等奖 papers consistently fill. Treat any missing one as a self-check failure:
+
+| 槽位 | MCM/ICM | CUMCM |
+|---|---|---|
+| Pre-summary | (none) | 承诺书 (statement of authorship) |
+| Page 1 | Summary Sheet (≤1 page, ≥2 numbers) | 摘要页 (≤1 页 ≤1000 字, ≥2 数字 + 3-5 关键词) |
+| Intro | Problem context + sub-question enumeration + literature pointer | 问题重述 + 文献综述 + 问题分析 |
+| Assumptions | {Assumption, Justification, Impact} triple | 三段式同上 |
+| Notation | Symbol table | 符号表 |
+| Model | First-principles derivation, ≥2 candidates, selection criterion | 同上 |
+| Algorithm | Numbered steps + complexity | 同上 |
+| Results | Numerical with units + 95% CI / σ | 同上 + 优化分析 |
+| Sensitivity | ≥3 params ±10%/±20%, tornado + heatmap | 同上 |
+| Strengths/Weaknesses | ≥3 strengths, ≥2 weaknesses tied to modeling | 优点/缺点;还要"推广" |
+| References | ≥15, inline-cited | ≥15, GB/T 7714 |
+
+If you see `few_shot_exemplars` in the user message, those are summary excerpts of historical O/F-prize papers on the same problem letter. Read them for structure and density, NOT for content. NEVER quote them; your numbers must come from THIS run's Coder output.
 """
 
 [user_template]
@@ -96,6 +134,10 @@ results verbatim where appropriate. When this block is empty, fall
 back to title+abstract citation from the Sources list.
 
 {{ paper_fulltexts }}
+
+## Same-problem-type O/F-prize exemplars (structure reference, do NOT copy)
+
+{{ few_shot_exemplars }}
 
 Respond with a JSON object. Required top-level keys:
   title (string),

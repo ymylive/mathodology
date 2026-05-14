@@ -102,6 +102,7 @@ class WriterAgent(BaseAgent):
         spec: ModelSpec,
         coder_output: CoderOutput,
         findings: SearchFindings | None = None,
+        upstream_reminders: str = "",
     ) -> PaperDraft:
         """Render the Writer template from all upstream artifacts and call the LLM."""
         # Fallback so existing callers / tests that don't pass findings still work.
@@ -159,6 +160,7 @@ class WriterAgent(BaseAgent):
             ),
             paper_fulltexts=fulltexts_block,
             few_shot_exemplars=few_shot_block,
+            upstream_reminders=upstream_reminders,
         )
         assert isinstance(output, PaperDraft)
         return output

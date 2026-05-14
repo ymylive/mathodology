@@ -56,6 +56,8 @@ Respond with a single JSON object matching ModelSpec. Use ensure_ascii=False for
 
 [user_template]
 text = """
+{{ upstream_reminders }}
+
 Problem type: {{ competition_type }}
 
 Problem statement:

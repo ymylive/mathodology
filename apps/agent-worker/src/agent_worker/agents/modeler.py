@@ -79,7 +79,10 @@ class ModelerAgent(BaseAgent):
         )
 
     async def run_for(
-        self, problem: ProblemInput, analysis: AnalyzerOutput
+        self,
+        problem: ProblemInput,
+        analysis: AnalyzerOutput,
+        upstream_reminders: str = "",
     ) -> ModelSpec:
         """Render the template from problem+analysis (+HMML context) and call the LLM."""
         retrieved: list[tuple[MethodNode, float]] = []
@@ -125,6 +128,7 @@ class ModelerAgent(BaseAgent):
             ),
             retrieved_methods=retrieved_ctx,
             few_shot_exemplars=few_shot_block,
+            upstream_reminders=upstream_reminders,
         )
         assert isinstance(output, ModelSpec)
         return output

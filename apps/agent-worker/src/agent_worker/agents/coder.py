@@ -109,6 +109,7 @@ class CoderAgent:
         analysis: AnalyzerOutput,
         spec: ModelSpec,
         max_iterations: int = MAX_ITERATIONS,
+        upstream_reminders: str = "",
     ) -> CoderOutput:
         """Execute the agent loop end-to-end; always emits stage lifecycle events."""
         t0 = time.monotonic()
@@ -141,6 +142,7 @@ class CoderAgent:
                     # Snippets are NOT injected — token budget would blow up
                     # past ~15k otherwise. LLM references catalog entries by id.
                     chart_catalog_index=render_index_markdown(),
+                    upstream_reminders=upstream_reminders,
                 ),
             },
         ]

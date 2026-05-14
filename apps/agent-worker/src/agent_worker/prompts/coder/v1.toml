@@ -325,6 +325,8 @@ evaluator scans for when triaging code-quality at speed.
 
 [user_template]
 text = """
+{{ upstream_reminders }}
+
 You are solving this problem. Read the Analyzer's scoped plan and the
 Modeler's concrete spec, then implement the approach step by step.
 

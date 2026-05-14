@@ -500,6 +500,15 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 "model_override": problem.model_override,
             }
 
+            # Critic builds its own kwargs because the run-level model_override
+            # (e.g. gpt-5.5 for the producer agents) is usually wrong for
+            # Critic — Critic emits a small JSON verdict, not prose, so a
+            # cheaper model handles it well. MM_CRITIC_MODEL_OVERRIDE wins
+            # over the run-level pick when set. Empty = falls through.
+            critic_kwargs: dict[str, Any] = dict(kwargs)
+            if settings.critic_model_override:
+                critic_kwargs["model_override"] = settings.critic_model_override
+
             # Shared dict for post-stage hook reminders. Keys are stage
             # names ("searcher", "modeler", "coder", "writer"). Each entry
             # is a `<system_reminder>` XML block produced by
@@ -508,7 +517,7 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             upstream_reminders: dict[str, str] = {}
 
             analyzer = AnalyzerAgent(gateway, emitter, **kwargs)
-            critic = CriticAgent(gateway, emitter, **kwargs)
+            critic = CriticAgent(gateway, emitter, **critic_kwargs)
 
             # Round-6 follow-up: read the gateway's authoritative cost
             # ledger (Redis key `mm:cost:<run_id>`, INCRBYFLOAT'd by

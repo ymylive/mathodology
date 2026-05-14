@@ -26,6 +26,14 @@ _PERSISTED_KINDS: frozenset[str] = frozenset(
         "cost",
         "done",
         "kernel.figure",
+        # Finetune session bookends + tool-call records belong to the
+        # forensic log too — they're low-volume (~3-20/turn) and a stream
+        # MAXLEN rolloff was previously erasing them past ~5000 events.
+        "finetune.session.start",
+        "finetune.session.done",
+        "finetune.session.error",
+        "finetune.tool_call",
+        "finetune.tool_result",
     }
 )
 

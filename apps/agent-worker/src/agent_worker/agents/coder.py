@@ -380,6 +380,15 @@ class CoderAgent:
             )
             return output
         finally:
+            # Always shut down the kernel between Coder turns — including
+            # revisions. The same CoderAgent instance is reused across
+            # revisions (see pipeline._review_and_maybe_rerun_coder) so
+            # without this shutdown, globals from the prior attempt would
+            # leak into the revision and mask bugs where the revised code
+            # silently depends on a name it never defines. The next coder.run
+            # calls kernel.start() again — KernelSession is idempotent on
+            # restart. ~3-5 s of cold-start is cheaper than chasing a subtle
+            # "works the second time only" bug.
             await self.kernel.shutdown()
 
     # ------------------------------------------------------------------ helpers

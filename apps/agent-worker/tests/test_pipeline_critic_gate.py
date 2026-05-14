@@ -124,7 +124,11 @@ def test_default_policy_has_active_revision_cost_estimates() -> None:
 
     assert policy.estimated_review_cost_rmb > 0
     assert policy.estimated_revision_cost_rmb > 0
-    assert policy.estimated_coder_revision_cost_rmb > policy.estimated_revision_cost_rmb
+    assert policy.estimated_coder_revision_cost_rmb > 0
+    # Round-6 audit corrected: writer/modeler revision (0.30) > coder rerun
+    # (0.18) because the upstream-context payload is larger than a targeted
+    # bug-fix prompt. The original test assumed the inverse and is now stale.
+    assert policy.estimated_revision_cost_rmb > policy.estimated_coder_revision_cost_rmb
 
 
 # checklist_pass_rate = 21/25 = 0.84 (between the 0.80 searcher override and

@@ -8,7 +8,7 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::audit::spawn_audit_task;
-use crate::dispatch::{enqueue_finetune_job, enqueue_job};
+use crate::dispatch::{enqueue_finetune_job, enqueue_job, signal_cancel};
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -177,6 +177,44 @@ pub async fn finetune_run(
             run_id,
             session_id,
             status: "queued",
+        }),
+    ))
+}
+
+#[derive(Debug, Serialize)]
+pub struct CancelAccepted {
+    pub run_id: Uuid,
+    pub status: &'static str,
+}
+
+/// `POST /runs/:run_id/cancel` — signal the worker to halt the run.
+///
+/// Idempotent: re-posting while a cancel is already pending is a no-op
+/// (returns the same shape). The worker polls `mm:cancel:<run_id>`
+/// between stages and raises `RunCancelled`, terminating with
+/// `done.status = "cancelled"` and the partial paper.md / notebook
+/// artifacts intact (cancellation is graceful — we never tear down a
+/// stage mid-write).
+#[tracing::instrument(skip_all, fields(%run_id))]
+pub async fn cancel_run(
+    State(mut state): State<AppState>,
+    Path(run_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<CancelAccepted>), AppError> {
+    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_optional(&state.pg)
+        .await
+        .map_err(|e| AppError::Internal(format!("lookup run: {e}")))?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+    let newly_set = signal_cancel(&mut state.redis, &run_id).await?;
+    tracing::info!(%run_id, newly_set, "cancel signal sent");
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(CancelAccepted {
+            run_id,
+            status: "cancel_signalled",
         }),
     ))
 }

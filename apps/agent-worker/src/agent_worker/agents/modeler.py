@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING
 
 from mm_contracts import AnalyzerOutput, ModelSpec, ProblemInput, ReasoningEffort
 
+from agent_worker.agents._common import (
+    problem_letter_from_problem_text as _problem_letter_from_problem_text,
+)
 from agent_worker.agents.base import BaseAgent
 from agent_worker.events import EventEmitter
 from agent_worker.few_shot import FewShotLibrary, format_writer_block, get_default_library
@@ -35,15 +38,6 @@ def _modeler_language(competition_type: str) -> str:
     if any(token in s for token in _ZH_FAMILIES) or "华数" in (competition_type or ""):
         return "zh"
     return "en"
-
-
-def _problem_letter_from_problem_text(problem_text: str) -> str | None:
-    import re
-
-    if not problem_text:
-        return None
-    m = re.search(r"Problem\s+([A-F])\b", problem_text, flags=re.IGNORECASE)
-    return m.group(1).upper() if m else None
 
 
 class ModelerAgent(BaseAgent):

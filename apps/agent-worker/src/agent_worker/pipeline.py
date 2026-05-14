@@ -58,7 +58,9 @@ from agent_worker.agents.evidence import (
     sensitivity_criteria,
 )
 from agent_worker.agents.hooks import aggregate, critique_to_hook_result
+from agent_worker.cancellation import CancellationChecker, RunCancelled
 from agent_worker.config import get_settings
+from agent_worker.cost_tracker import RunCostTracker
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
 from agent_worker.hmml import HMMLService
@@ -72,17 +74,30 @@ _log = logging.getLogger(__name__)
 class CriticPolicy:
     min_score: float = 0.80
     min_checklist_pass_rate: float = 0.85
-    max_revision_rounds: int = 2
+    max_revision_rounds: int = 2  # default fallback
     coder_revision_iterations: int = 2
     max_revision_cost_rmb: float = 1.00
-    estimated_review_cost_rmb: float = 0.02
-    estimated_revision_cost_rmb: float = 0.05
-    estimated_coder_revision_cost_rmb: float = 0.12
+    # Round-6 cost audit corrected these from 0.02/0.05/0.12 — they were a 7×
+    # underestimate so revisions ran well past the max_revision_cost_rmb cap.
+    # The cap behavior is unchanged; only the per-iteration accounting is now
+    # accurate, so the loop actually halts at ~1.00 RMB.
+    estimated_review_cost_rmb: float = 0.14
+    estimated_revision_cost_rmb: float = 0.30
+    estimated_coder_revision_cost_rmb: float = 0.18
     min_score_overrides: Mapping[str, float] = field(
         default_factory=lambda: MappingProxyType({"searcher": 0.75})
     )
     min_checklist_pass_rate_overrides: Mapping[str, float] = field(
         default_factory=lambda: MappingProxyType({"searcher": 0.80})
+    )
+    # Per-stage cap on revision rounds. Writer:1 because round-3 only fixes
+    # ~3% of issues but costs 0.62 RMB (round-6 cost audit). Analyzer and
+    # Searcher also capped at 1 — they're cheap but marginal returns drop
+    # off quickly. Modeler and Coder stay at the default (2).
+    max_revision_rounds_overrides: Mapping[str, int] = field(
+        default_factory=lambda: MappingProxyType(
+            {"writer": 1, "analyzer": 1, "searcher": 1}
+        )
     )
 
 
@@ -165,6 +180,7 @@ async def _review_and_maybe_revise(
     policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
     estimated_review_cost_rmb: float | None = None,
     estimated_revision_cost_rmb: float | None = None,
+    cost_tracker: RunCostTracker | None = None,
     reminders_out: dict[str, str] | None = None,
 ) -> BaseModel:
     """Critic-driven review with up to `max_revision_rounds` retries.
@@ -175,6 +191,14 @@ async def _review_and_maybe_revise(
     then render this string as a `<system_reminder>` block in their
     user prompt — that's how Critic minor-finding feedback flows
     forward without a full revision round.
+
+    When `cost_tracker` is provided, the revision-cost budget is enforced
+    against the gateway's ACTUAL cost-ledger total (read from
+    `mm:cost:<run_id>`) rather than the estimates in
+    `CriticPolicy.estimated_*_cost_rmb`. The estimate is still added on
+    top to predict the NEXT call so we stop *before* exceeding the
+    budget, not after. Without a tracker the function falls back to
+    estimate-only accounting (backward-compatible default).
     """
     review_cost_rmb = (
         policy.estimated_review_cost_rmb
@@ -186,6 +210,31 @@ async def _review_and_maybe_revise(
         if estimated_revision_cost_rmb is None
         else estimated_revision_cost_rmb
     )
+    # Round-7: writer is capped at 1 revision (3% issue-fix rate vs 0.62 RMB
+    # per round). Other agents fall through to the default (2).
+    max_rounds = policy.max_revision_rounds_overrides.get(
+        target_agent, policy.max_revision_rounds
+    )
+
+    async def _spent_so_far(estimate: float) -> float:
+        """Return authoritative spend (tracker delta) or estimate fallback.
+
+        The tracker reads `mm:cost:<run_id>` which the gateway
+        INCRBYFLOATs on every chargeable LLM call. Falling back to
+        `estimate` when no tracker is provided keeps the unit tests
+        (and any caller that hasn't wired Redis through yet) working.
+        """
+        if cost_tracker is None:
+            return estimate
+        return await cost_tracker.delta_since_baseline()
+
+    if cost_tracker is not None:
+        # Anchor the budget at "what's been spent inside this loop only".
+        # Without a baseline the delta would include all upstream stage
+        # cost, so we'd start `budget_exhausted=True` immediately on any
+        # non-trivial run.
+        await cost_tracker.snapshot_baseline()
+
     current = output
     loop_cost_rmb = 0.0
     report = await critic.review(
@@ -195,14 +244,15 @@ async def _review_and_maybe_revise(
         context=context,
         criteria=criteria,
         revision_round=0,
-        max_revision_rounds=policy.max_revision_rounds,
+        max_revision_rounds=max_rounds,
     )
     loop_cost_rmb += review_cost_rmb
     if not _critique_requires_revision(report, policy):
         return current
 
-    for revision_round in range(1, policy.max_revision_rounds + 1):
-        if loop_cost_rmb + revision_cost_rmb > policy.max_revision_cost_rmb:
+    for revision_round in range(1, max_rounds + 1):
+        actual = await _spent_so_far(loop_cost_rmb)
+        if actual + revision_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
             break
         try:
@@ -222,7 +272,8 @@ async def _review_and_maybe_revise(
             )
             break
         loop_cost_rmb += revision_cost_rmb
-        if loop_cost_rmb + review_cost_rmb > policy.max_revision_cost_rmb:
+        actual = await _spent_so_far(loop_cost_rmb)
+        if actual + review_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
             break
         report = await critic.review(
@@ -232,7 +283,7 @@ async def _review_and_maybe_revise(
             context=context,
             criteria=criteria,
             revision_round=revision_round,
-            max_revision_rounds=policy.max_revision_rounds,
+            max_revision_rounds=max_rounds,
         )
         loop_cost_rmb += review_cost_rmb
         if not _critique_requires_revision(report, policy):
@@ -287,6 +338,7 @@ async def _review_and_maybe_rerun_coder(
     spec: ModelSpec,
     coder_out: CoderOutput,
     policy: CriticPolicy = DEFAULT_CRITIC_POLICY,
+    cost_tracker: RunCostTracker | None = None,
     reminders_out: dict[str, str] | None = None,
 ) -> CoderOutput:
     criteria = [
@@ -300,6 +352,20 @@ async def _review_and_maybe_rerun_coder(
         "analysis": analysis.model_dump(mode="json"),
         "spec": spec.model_dump(mode="json"),
     }
+    # Round-7: coder falls through to the default (2) because it's not in
+    # the overrides map — coder reruns actually fix bugs at a high rate.
+    max_rounds = policy.max_revision_rounds_overrides.get(
+        "coder", policy.max_revision_rounds
+    )
+
+    async def _spent_so_far(estimate: float) -> float:
+        if cost_tracker is None:
+            return estimate
+        return await cost_tracker.delta_since_baseline()
+
+    if cost_tracker is not None:
+        await cost_tracker.snapshot_baseline()
+
     report = await critic.review(
         target_agent="coder",
         target_schema="CoderOutput",
@@ -307,18 +373,16 @@ async def _review_and_maybe_rerun_coder(
         context=context,
         criteria=criteria,
         revision_round=0,
-        max_revision_rounds=policy.max_revision_rounds,
+        max_revision_rounds=max_rounds,
     )
     loop_cost_rmb = policy.estimated_review_cost_rmb
     if not _critique_requires_revision(report, policy):
         return coder_out
 
     current = coder_out
-    for revision_round in range(1, policy.max_revision_rounds + 1):
-        if (
-            loop_cost_rmb + policy.estimated_coder_revision_cost_rmb
-            > policy.max_revision_cost_rmb
-        ):
+    for revision_round in range(1, max_rounds + 1):
+        actual = await _spent_so_far(loop_cost_rmb)
+        if actual + policy.estimated_coder_revision_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
             break
         revision_problem = CoderAgent.build_revision_problem(
@@ -346,10 +410,8 @@ async def _review_and_maybe_rerun_coder(
             )
             break
         loop_cost_rmb += policy.estimated_coder_revision_cost_rmb
-        if (
-            loop_cost_rmb + policy.estimated_review_cost_rmb
-            > policy.max_revision_cost_rmb
-        ):
+        actual = await _spent_so_far(loop_cost_rmb)
+        if actual + policy.estimated_review_cost_rmb > policy.max_revision_cost_rmb:
             report.budget_exhausted = True
             break
         report = await critic.review(
@@ -359,7 +421,7 @@ async def _review_and_maybe_rerun_coder(
             context=context,
             criteria=criteria,
             revision_round=revision_round,
-            max_revision_rounds=policy.max_revision_rounds,
+            max_revision_rounds=max_rounds,
         )
         loop_cost_rmb += policy.estimated_review_cost_rmb
         if not _critique_requires_revision(report, policy):
@@ -418,6 +480,23 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
 
             analyzer = AnalyzerAgent(gateway, emitter, **kwargs)
             critic = CriticAgent(gateway, emitter, **kwargs)
+
+            # Round-6 follow-up: read the gateway's authoritative cost
+            # ledger (Redis key `mm:cost:<run_id>`, INCRBYFLOAT'd by
+            # `gateway::llm::cost::record_completion_cost`) so the Critic
+            # revision budget compares actual spend, not estimates.
+            cost_tracker = RunCostTracker(redis, run_id)
+
+            # Round-7: mid-run cancellation. The gateway writes
+            # `mm:cancel:<run_id> = "1"` on `POST /runs/:id/cancel`; the
+            # worker polls this key at every stage boundary (and at each
+            # Coder turn) so users can halt a 90-min pipeline without
+            # waiting it out. `RunCancelled` is an `AgentError` subclass
+            # — caught by the outer try below and converted to a clean
+            # `done(status="cancelled")` event with partial artifacts.
+            cancel = CancellationChecker(redis, run_id)
+
+            await cancel.check_or_raise()
             analysis = await analyzer.run_for_problem(problem)
             analysis = await _review_and_maybe_revise(
                 critic=critic,
@@ -434,10 +513,12 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                     "Lists concrete data requirements.",
                     "Proposes at least one usable modeling approach.",
                 ],
+                cost_tracker=cost_tracker,
                 reminders_out=upstream_reminders,
             )
             assert isinstance(analysis, AnalyzerOutput)
 
+            await cancel.check_or_raise()
             searcher = SearcherAgent(gateway, emitter, runs_dir=runs_dir, **kwargs)
             findings = await searcher.run_for(
                 problem,
@@ -455,10 +536,12 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                     "analysis": analysis.model_dump(mode="json"),
                 },
                 criteria=_searcher_review_criteria(),
+                cost_tracker=cost_tracker,
                 reminders_out=upstream_reminders,
             )
             assert isinstance(findings, SearchFindings)
 
+            await cancel.check_or_raise()
             modeler = ModelerAgent(gateway, emitter, hmml=hmml, **kwargs)
             spec = await modeler.run_for(
                 problem,
@@ -480,10 +563,12 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                     "Algorithm outline is executable by Coder.",
                     "Validation strategy is concrete.",
                 ],
+                cost_tracker=cost_tracker,
                 reminders_out=upstream_reminders,
             )
             assert isinstance(spec, ModelSpec)
 
+            await cancel.check_or_raise()
             coder = CoderAgent(
                 gateway, emitter, kernel, matlab_session=matlab_session, **kwargs
             )
@@ -500,9 +585,11 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 analysis=analysis,
                 spec=spec,
                 coder_out=coder_out,
+                cost_tracker=cost_tracker,
                 reminders_out=upstream_reminders,
             )
 
+            await cancel.check_or_raise()
             writer = WriterAgent(gateway, emitter, run_dir=run_dir, **kwargs)
             paper = await writer.run_for(
                 problem,
@@ -553,6 +640,7 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 producer=writer,
                 target_agent="writer",
                 output=paper,
+                cost_tracker=cost_tracker,
                 reminders_out=upstream_reminders,  # final stage; for post-mortem
                 context={
                     "problem_text": problem.problem_text,
@@ -622,6 +710,21 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
             if pdf_path is not None:
                 done_payload["pdf_path"] = str(pdf_path)
             await emitter.emit("done", done_payload, agent=None)
+        except RunCancelled as exc:
+            # User-initiated cancel. Differentiate from "failed" so the UI
+            # shows it as an intentional stop (status='cancelled'), and so
+            # the cost ledger isn't treated as a bug — we want this in the
+            # dashboard. Whatever partial artifacts exist (paper.md from a
+            # prior stage, notebook from Coder) are left on disk; the user
+            # can inspect via the existing serve_paper / serve_notebook
+            # routes.
+            _log.info("pipeline cancelled by user: %s", exc)
+            await emitter.emit(
+                "log",
+                {"level": "info", "message": "run cancelled by user"},
+                agent=None,
+            )
+            await emitter.emit("done", {"status": "cancelled"}, agent=None)
         except AgentError as exc:
             # Surface the real reason before declaring failure. Without this
             # the run terminates silently and forensics requires hand-walking

@@ -62,8 +62,19 @@ class BaseAgent:
         )
 
         model = self._model_override or self.prompt.model_preference[0]
+        # `cache_breakpoint=True` on the system message tells the gateway to
+        # emit Anthropic-style `cache_control: {type: "ephemeral"}` on that
+        # block. Anthropic caches the prefix up to (and including) the
+        # breakpoint, so the entire system prompt (the BIG stable chunk —
+        # role, schemas, chart catalog, few-shot exemplars for Coder/Writer)
+        # becomes eligible for prompt-cache hits on every repeated call.
+        # User messages vary per turn and are intentionally left unmarked.
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.prompt.system["text"]},
+            {
+                "role": "system",
+                "content": self.prompt.system["text"],
+                "cache_breakpoint": True,
+            },
             {"role": "user", "content": self.prompt.render_user(**template_vars)},
         ]
 
@@ -178,8 +189,15 @@ class BaseAgent:
         whole pipeline. We do one retry with the parse error appended.
         """
         model = self._model_override or self.prompt.model_preference[0]
+        # Same caching rationale as `run()`: the system prompt is the stable
+        # prefix shared across the original generation AND the revision call,
+        # so marking it as a breakpoint allows the second call to hit cache.
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.prompt.system["text"]},
+            {
+                "role": "system",
+                "content": self.prompt.system["text"],
+                "cache_breakpoint": True,
+            },
             {
                 "role": "user",
                 "content": (

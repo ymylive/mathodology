@@ -44,9 +44,36 @@ impl OpenAICompatAdapter {
     }
 
     fn build_body(&self, req: &CanonicalRequest, stream: bool) -> Value {
+        // Translate canonical messages to JSON. When a message asks to be a
+        // prompt-cache breakpoint we attach `cache_control: { type:
+        // "ephemeral" }` at the message level — Anthropic-backed OpenAI-compat
+        // proxies (e.g. cornna's cdnapi.cornna.xyz) forward it to the
+        // upstream Claude `/v1/messages` call; vanilla OpenAI providers
+        // ignore the extra field silently, so this is safe to emit
+        // unconditionally for breakpoint messages.
+        let messages: Vec<Value> = req
+            .messages
+            .iter()
+            .map(|m| {
+                let mut obj = serde_json::Map::new();
+                obj.insert("role".into(), json!(m.role));
+                obj.insert("content".into(), json!(m.content));
+                if let Some(ref n) = m.name {
+                    obj.insert("name".into(), json!(n));
+                }
+                if m.cache_breakpoint {
+                    obj.insert(
+                        "cache_control".into(),
+                        json!({ "type": "ephemeral" }),
+                    );
+                }
+                Value::Object(obj)
+            })
+            .collect();
+
         let mut body = json!({
             "model": req.model,
-            "messages": req.messages,
+            "messages": messages,
             "stream": stream,
         });
         if let Some(t) = req.temperature {
@@ -210,6 +237,7 @@ mod tests {
                 role: "user".into(),
                 content: "hi".into(),
                 name: None,
+                cache_breakpoint: false,
             }],
             temperature: Some(0.2),
             max_tokens: None,
@@ -266,5 +294,69 @@ mod tests {
         let body = adapter.build_body(&req, false);
         assert!(body.get("reasoning_effort").is_none());
         assert!(body.get("reasoning").is_none());
+    }
+
+    /// `cache_breakpoint = true` on a canonical message must surface as
+    /// `cache_control: { type: "ephemeral" }` at the message level in the
+    /// outgoing body. Anthropic-backed OpenAI-compat proxies (cornna's
+    /// cdnapi.cornna.xyz pointing at Claude) honour this; vanilla OpenAI
+    /// ignores the extra field, which is the design goal — single canonical
+    /// shape that's safe to emit unconditionally for opt-in messages.
+    #[test]
+    fn build_body_forwards_cache_breakpoint_as_cache_control() {
+        let adapter = mk_adapter();
+        let req = CanonicalRequest {
+            model: "gpt-5".into(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".into(),
+                    content: "big stable system prompt".into(),
+                    name: None,
+                    cache_breakpoint: true,
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: "go".into(),
+                    name: None,
+                    cache_breakpoint: false,
+                },
+            ],
+            temperature: None,
+            max_tokens: None,
+            stream: false,
+            response_format: None,
+            reasoning_effort: None,
+        };
+        let body = adapter.build_body(&req, false);
+        let msgs = body["messages"].as_array().expect("messages array");
+        assert_eq!(msgs.len(), 2);
+
+        // System message: tagged.
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[0]["content"], "big stable system prompt");
+        assert_eq!(
+            msgs[0]["cache_control"]["type"], "ephemeral",
+            "system breakpoint must surface cache_control"
+        );
+
+        // User message: untouched.
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "go");
+        assert!(
+            msgs[1].get("cache_control").is_none(),
+            "non-breakpoint messages must NOT carry cache_control"
+        );
+    }
+
+    /// Without any breakpoints, the message JSON shape is unchanged: bare
+    /// role + content keys, no extra `cache_control` noise on the wire.
+    #[test]
+    fn build_body_omits_cache_control_without_breakpoint() {
+        let adapter = mk_adapter();
+        let req = mk_req();
+        let body = adapter.build_body(&req, false);
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].get("cache_control").is_none());
     }
 }

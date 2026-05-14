@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import type { AgentEvent, AgentName } from "@mathodology/contracts";
 import { http, devAuthToken } from "@/api/http";
 import { RunWsClient } from "@/api/ws";
+import { useFinetuneStore, isFinetuneKind } from "@/stores/finetune";
 
 export type RunStatus = "idle" | "queued" | "running" | "done" | "failed";
 
@@ -212,6 +213,15 @@ export const useRunStore = defineStore("run", {
     },
 
     handleEvent(ev: AgentEvent) {
+      // Fine-tune events ride the same WebSocket but belong to a different
+      // store. Forward them and bail before any pipeline-handling runs.
+      // The kind string isn't in EventKind's union (the contract is the
+      // pipeline's), so we use a prefix check that accepts any `finetune.*`.
+      if (isFinetuneKind(ev.kind as unknown as string)) {
+        useFinetuneStore().handleEvent(ev);
+        return;
+      }
+
       const agentKey = agentKeyOf(ev.agent);
 
       // `token` events are extremely chatty. We keep them out of the main

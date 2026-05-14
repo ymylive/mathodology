@@ -13,6 +13,7 @@ pub fn build_router(state: AppState) -> Router {
     let authed = Router::new()
         .route("/runs", post(runs::create_run).get(runs::list_runs))
         .route("/runs/:run_id", get(runs::get_run))
+        .route("/runs/:run_id/finetune", post(runs::finetune_run))
         .route("/runs/:run_id/figures/*path", get(figures::serve_figure))
         .route("/runs/:run_id/notebook", get(figures::serve_notebook))
         .route("/runs/:run_id/paper", get(figures::serve_paper))

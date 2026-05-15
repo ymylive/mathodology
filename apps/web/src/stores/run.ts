@@ -320,6 +320,9 @@ export const useRunStore = defineStore("run", {
 
       // Kernel stdout/stderr: incremental text per cell. Folded into
       // kernelCells; kept out of the ordered feed (too chatty for the feed).
+      // Hard cap per-stream length so a runaway warning flood (e.g. the
+      // matplotlib glyph-missing warnings before round-10 kernel bootstrap
+      // fix) can't blow up DOM size or freeze the render with a 5MB string.
       if (ev.kind === "kernel.stdout") {
         const p = ev.payload as {
           text?: unknown;
@@ -330,10 +333,24 @@ export const useRunStore = defineStore("run", {
         const name = p.name === "stderr" ? "stderr" : "stdout";
         const ci = typeof p.cell_index === "number" ? p.cell_index : 0;
         const cell = this.kernelCells[ci] ?? emptyCell();
+        const MAX_STREAM_CHARS = 32_000;
+        const truncate = (existing: string, delta: string): string => {
+          const combined = existing + delta;
+          if (combined.length <= MAX_STREAM_CHARS) return combined;
+          // Keep the tail (most recent output is most relevant when
+          // debugging); prepend a one-line note so the truncation is visible.
+          const tail = combined.slice(-MAX_STREAM_CHARS);
+          return (
+            "[…truncated to last " +
+            MAX_STREAM_CHARS.toString() +
+            " chars…]\n" +
+            tail
+          );
+        };
         if (name === "stderr") {
-          cell.stderr = cell.stderr + text;
+          cell.stderr = truncate(cell.stderr, text);
         } else {
-          cell.stdout = cell.stdout + text;
+          cell.stdout = truncate(cell.stdout, text);
         }
         this.kernelCells[ci] = cell;
         return;

@@ -109,6 +109,28 @@ plt.rcParams["axes.grid"] = True
 plt.rcParams["grid.alpha"] = 0.25
 plt.rcParams["axes.spines.top"] = False
 plt.rcParams["axes.spines.right"] = False
+
+# CJK self-test: ask font_manager which font would be selected for
+# rendering the active family, then check whether it actually has a
+# common Chinese codepoint mapped. The audit gate (audit.py) reads
+# the sentinel file written here to decide whether to bounce the run
+# back to Coder for English-label figures.
+import os as _os
+try:
+    from matplotlib import font_manager as _fm
+    _resolved = _fm.findfont(plt.rcParams["font.sans-serif"][0])
+    _font = _fm.get_font(_resolved)
+    # 0x6D4B = '测' — a non-trivial CJK ideograph. get_char_index returns
+    # 0 when the glyph is missing.
+    _cjk_ok = bool(_font.get_char_index(0x6D4B))
+except Exception:
+    _cjk_ok = False
+# Kernel cwd is run_dir; the audit reads `.cjk_font_ok` from there.
+try:
+    with open(_os.path.join(_os.getcwd(), ".cjk_font_ok"), "w") as _f:
+        _f.write("true" if _cjk_ok else "false")
+except Exception:
+    pass
 """
     # Helpers (`styled_figure`, `save_figure`, `annotate_peak`) are defined
     # in `agent_worker._chart_helpers` and inlined here so the kernel — which

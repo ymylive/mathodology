@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -58,6 +59,7 @@ from agent_worker.agents.evidence import (
     sensitivity_criteria,
 )
 from agent_worker.agents.hooks import aggregate, critique_to_hook_result
+from agent_worker.audit import run_paper_audit
 from agent_worker.cancellation import CancellationChecker, RunCancelled
 from agent_worker.config import get_settings
 from agent_worker.cost_tracker import RunCostTracker
@@ -189,6 +191,185 @@ def _searcher_review_criteria() -> list[str]:
         "Source relevance is clear for the analyzed modeling approach and problem context.",
         "Empty or sparse search results are handled gracefully without inventing references.",
     ]
+
+
+async def _run_audit_and_maybe_revise(
+    *,
+    paper: BaseModel,  # PaperDraft, but typed loose to avoid forward import
+    paper_md_for_check: str,
+    coder_out: BaseModel,  # CoderOutput
+    analysis: BaseModel,  # AnalyzerOutput
+    run_dir: Path,
+    writer: BaseAgent,
+    critic: CriticAgent,
+    writer_criteria: list[str],
+    writer_context: dict[str, Any],
+    cost_tracker: RunCostTracker | None,
+    emitter: EventEmitter,
+    cancel: CancellationChecker,
+) -> BaseModel:
+    """Pre-submission audit gate.
+
+    Runs the rule-based checks in `audit.py`. If any blocking findings
+    are targeted at `writer`, drive ONE revision pass through the
+    existing `revise_with_critique` flow with an injected audit hint
+    so the Writer sees the concrete issues to fix. Findings targeted
+    at `coder` (e.g. broken CJK fonts in figures) are too expensive to
+    auto-fix here — surface them as `log.warning` events for the user
+    to see in the UI.
+
+    Returns the (possibly revised) paper.
+    """
+    from mm_contracts import (  # local import to dodge cycle pressure
+        AnalyzerOutput,
+        CoderOutput,
+        CritiqueFinding,
+        CritiqueReport,
+        PaperDraft,
+    )
+
+    assert isinstance(paper, PaperDraft)
+    assert isinstance(coder_out, CoderOutput)
+    assert isinstance(analysis, AnalyzerOutput)
+
+    await emitter.emit(
+        "stage.start", {"stage": "audit"}, agent="audit"
+    )
+    t0_audit = time.monotonic()
+    report = run_paper_audit(
+        paper=paper,
+        paper_md=paper_md_for_check,
+        coder_out=coder_out,
+        analysis=analysis,
+        run_dir=run_dir,
+    )
+
+    # Always surface findings — even non-blocking ones — so the user can
+    # see the gate is doing something.
+    for f in report.findings:
+        await emitter.emit(
+            "log",
+            {
+                "level": "warning" if f.severity == "blocking" else "info",
+                "message": f"audit/{f.code}: {f.message}",
+            },
+            agent="audit",
+        )
+
+    audit_dur_ms = int((time.monotonic() - t0_audit) * 1000)
+    await emitter.emit(
+        "stage.done",
+        {
+            "stage": "audit",
+            "duration_ms": audit_dur_ms,
+            "passed": report.passed,
+            "finding_count": len(report.findings),
+        },
+        agent="audit",
+    )
+
+    if report.passed:
+        return paper
+
+    writer_blocking = report.blocking_for("writer")
+    if not writer_blocking:
+        # Only Coder-side findings remain — log and ship (re-running
+        # Coder here would double the run cost; better to let the user
+        # decide via fine-tune).
+        return paper
+
+    # One revision pass driven by the audit hint. Reuse the existing
+    # `revise_with_critique` contract by synthesising a CritiqueReport
+    # whose `summary` carries the merged audit hint — the Writer's
+    # prompt already knows how to consume that shape.
+    audit_hint = report.merged_hint_for("writer")
+    fake_critique = CritiqueReport(
+        target_agent="writer",
+        target_schema="PaperDraft",
+        scores={"audit": 0.0},
+        passed=False,
+        has_blocking_findings=True,
+        major_findings=[
+            CritiqueFinding(
+                dimension="audit",
+                severity="major",
+                description=f.message,
+                fix_hint=f.fix_hint,
+            )
+            for f in writer_blocking
+        ],
+        minor_findings=[],
+        summary=audit_hint,
+        checklist_pass_rate=0.0,
+        recommended_action="revise",
+    )
+
+    await cancel.check_or_raise()
+    await emitter.emit(
+        "log",
+        {
+            "level": "info",
+            "message": (
+                f"audit bouncing back to writer for {len(writer_blocking)} "
+                "blocking finding(s)"
+            ),
+        },
+        agent="audit",
+    )
+    try:
+        revised = await writer.revise_with_critique(
+            original_output=paper,
+            critique=fake_critique,
+            context=writer_context,
+        )
+    except AgentError as exc:
+        # Writer revision crashed — log and ship the original. Better
+        # than a hard failure when we already have a paper in hand.
+        _log.warning("audit-triggered writer revision failed: %s", exc)
+        await emitter.emit(
+            "log",
+            {
+                "level": "warning",
+                "message": (
+                    "audit revision attempt failed; shipping original paper: "
+                    f"{exc}"
+                ),
+            },
+            agent="audit",
+        )
+        return paper
+    if cost_tracker is not None:
+        # Refresh the run's spend so downstream stages (if any) see the
+        # post-audit number.
+        await cost_tracker.get_total()
+    assert isinstance(revised, PaperDraft)
+
+    # Re-run audit on the revised paper to confirm we're shipping
+    # something cleaner — this is best-effort signal, not a second
+    # revision loop.
+    revised_md = _render_paper_markdown(
+        _substitute_figure_placeholders(revised, coder_out.figures, emitter_log=_log)
+    )
+    second_report = run_paper_audit(
+        paper=revised,
+        paper_md=revised_md,
+        coder_out=coder_out,
+        analysis=analysis,
+        run_dir=run_dir,
+    )
+    delta = len(report.findings) - len(second_report.findings)
+    await emitter.emit(
+        "log",
+        {
+            "level": "info" if delta >= 0 else "warning",
+            "message": (
+                f"audit second pass: {len(second_report.findings)} finding(s) "
+                f"remaining (was {len(report.findings)})"
+            ),
+        },
+        agent="audit",
+    )
+    return revised
 
 
 async def _review_and_maybe_revise(
@@ -737,6 +918,40 @@ async def run_pipeline(redis: Redis, run_id: UUID, problem: ProblemInput) -> Non
                 criteria=base_writer_criteria + extra_criteria,
             )
             assert isinstance(paper, PaperDraft)
+
+            # Pre-submission audit gate (round-10 follow-up). Runs after
+            # Writer + its Critic pass have settled. Catches issues no
+            # per-stage Critic can: orphan figures, sparse references,
+            # uncovered sub-questions, CJK-broken figures. Findings
+            # tagged `dispatch_to="writer"` trigger ONE revision pass
+            # against the original Writer with the audit hint injected
+            # as a system reminder; Coder-targeted findings surface as
+            # warnings (re-running Coder is too expensive for v1).
+            paper = await _run_audit_and_maybe_revise(
+                paper=paper,
+                paper_md_for_check=_render_paper_markdown(
+                    _substitute_figure_placeholders(
+                        paper, coder_out.figures, emitter_log=_log
+                    )
+                ),
+                coder_out=coder_out,
+                analysis=analysis,
+                run_dir=run_dir,
+                writer=writer,
+                critic=critic,
+                writer_criteria=base_writer_criteria + extra_criteria,
+                writer_context={
+                    "problem_text": problem.problem_text,
+                    "competition_type": problem.competition_type,
+                    "analysis": analysis.model_dump(mode="json"),
+                    "spec": spec.model_dump(mode="json"),
+                    "coder_output": coder_out.model_dump(mode="json"),
+                    "search_findings": findings.model_dump(mode="json"),
+                },
+                cost_tracker=cost_tracker,
+                emitter=emitter,
+                cancel=cancel,
+            )
 
             # Resolve `[[FIG:<id>]]` placeholders in the Writer's output:
             # the on-disk paper.md gets real markdown image syntax (for the

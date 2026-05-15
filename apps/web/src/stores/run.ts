@@ -107,6 +107,20 @@ function emptyCell(): KernelCellState {
 // proxy its internals (and so we don't log the whole socket into devtools).
 let ws: RunWsClient | null = null;
 
+// Token-batching buffer.
+//
+// Vue/Pinia re-renders on every reactive write. Writing each token directly
+// to `this.tokens[agentKey].text` means ~5000 full re-renders per Coder
+// stage, which silently jams the render queue — the UI freezes mid-stage
+// even though the WS is still receiving tokens (a hard refresh "fixes"
+// it because it resets reactivity from the latest snapshot).
+//
+// Instead: queue deltas into this plain Map keyed by agent. A single rAF
+// loop drains the queue into reactive state once per animation frame, so
+// the render rate is capped at ~60fps regardless of token rate.
+const _pendingTokenDeltas: Map<string, { delta: string; model: string | null; ts: string }> = new Map();
+let _flushScheduled = false;
+
 export const useRunStore = defineStore("run", {
   state: (): State => ({
     runId: null,
@@ -145,6 +159,9 @@ export const useRunStore = defineStore("run", {
     reset() {
       ws?.close();
       ws = null;
+      // Drop any pending token deltas from the prior run so they don't
+      // leak into the fresh `tokens` state on the next rAF flush.
+      _pendingTokenDeltas.clear();
       this.runId = null;
       this.status = "idle";
       this.events = [];
@@ -256,13 +273,48 @@ export const useRunStore = defineStore("run", {
       if (ev.kind === "token") {
         const payload = ev.payload as { text?: unknown; model?: unknown };
         const delta = typeof payload.text === "string" ? payload.text : "";
-        const existing = this.tokens[agentKey] ?? emptyStream();
-        this.tokens[agentKey] = {
-          text: existing.text + delta,
-          model:
-            typeof payload.model === "string" ? payload.model : existing.model,
-          updatedAt: ev.ts,
-        };
+        if (!delta) return;
+        const model =
+          typeof payload.model === "string" ? payload.model : null;
+        // Accumulate into the non-reactive buffer. The pending entry holds
+        // the CONCATENATED delta since the last flush, the latest model
+        // value, and the newest event ts.
+        const pending = _pendingTokenDeltas.get(agentKey);
+        if (pending) {
+          pending.delta += delta;
+          if (model) pending.model = model;
+          pending.ts = ev.ts;
+        } else {
+          _pendingTokenDeltas.set(agentKey, {
+            delta,
+            model,
+            ts: ev.ts,
+          });
+        }
+        // Schedule one rAF flush per frame. The flush mutates reactive
+        // state, so Vue re-renders at most ~60 Hz instead of per-token.
+        if (!_flushScheduled) {
+          _flushScheduled = true;
+          const flush = (): void => {
+            _flushScheduled = false;
+            if (_pendingTokenDeltas.size === 0) return;
+            for (const [k, p] of _pendingTokenDeltas) {
+              const existing = this.tokens[k] ?? emptyStream();
+              this.tokens[k] = {
+                text: existing.text + p.delta,
+                model: p.model ?? existing.model,
+                updatedAt: p.ts,
+              };
+            }
+            _pendingTokenDeltas.clear();
+          };
+          if (typeof requestAnimationFrame !== "undefined") {
+            requestAnimationFrame(flush);
+          } else {
+            // Headless fallback (tests / SSR).
+            setTimeout(flush, 16);
+          }
+        }
         return;
       }
 
@@ -372,6 +424,9 @@ export const useRunStore = defineStore("run", {
       if (ev.kind === "stage.start") {
         // New stage for this agent: clear the streaming buffer so the UI
         // shows fresh text rather than concatenating across stages.
+        // Also drop any pending deltas for this agent so a late rAF flush
+        // doesn't re-pollute the freshly-cleared buffer.
+        _pendingTokenDeltas.delete(agentKey);
         this.tokens[agentKey] = {
           text: "",
           model: this.tokens[agentKey]?.model ?? null,

@@ -103,6 +103,38 @@ function emptyCell(): KernelCellState {
   return { stdout: "", stderr: "", figures: [] };
 }
 
+// Workers running matplotlib without an installed CJK font + missing the
+// round-10 warnings filter emit a 2-line block per missing glyph per
+// savefig call: a UserWarning header and the offending source line. A
+// single Coder turn can generate hundreds of these and they crowd out
+// real diagnostics. Drop them client-side so the cell-stderr panel
+// stays useful regardless of which worker version ran the cell.
+//
+// Patterns we match (each is one source line; the source-line variant of
+// "  plt.savefig(..." follows the warning header):
+//   `/path/to/ipykernel.../*.py:NNN: UserWarning: Glyph N (\N{...}) missing from font(s) ...`
+//   `  plt.savefig('figures/foo.png', dpi=...)`
+//
+// The savefig line is the warning's "source pointer" the Python warnings
+// machinery prints after the message — useless without the message, so
+// we drop both. We also drop standalone `Glyph N ... missing from font`
+// lines for the rare proxy that prints only the message.
+const _GLYPH_WARN_RE =
+  /^.*UserWarning: Glyph \d+.*missing from font\(s\).*\n(?:\s+plt\.savefig\([^)]*\)\s*\n)?/gm;
+const _GLYPH_BARE_RE =
+  /^Glyph \d+ \(\\N\{[^}]+\}\) missing from font\(s\)[^\n]*\n?/gm;
+const _SAVEFIG_BARE_RE =
+  /^\s+plt\.savefig\(['"]figures\/[^)]+\)\s*\n?/gm;
+
+function _stripMatplotlibGlyphWarnings(text: string): string {
+  if (!text) return text;
+  if (!text.includes("missing from font")) return text;
+  return text
+    .replace(_GLYPH_WARN_RE, "")
+    .replace(_GLYPH_BARE_RE, "")
+    .replace(_SAVEFIG_BARE_RE, "");
+}
+
 // The WebSocket client is kept outside reactive state so Vue doesn't try to
 // proxy its internals (and so we don't log the whole socket into devtools).
 let ws: RunWsClient | null = null;
@@ -329,7 +361,14 @@ export const useRunStore = defineStore("run", {
           name?: unknown;
           cell_index?: unknown;
         };
-        const text = typeof p.text === "string" ? p.text : "";
+        let text = typeof p.text === "string" ? p.text : "";
+        // Belt-and-braces drop of the matplotlib CJK-glyph warnings. The
+        // kernel bootstrap silences them via warnings.filterwarnings, but
+        // workers running pre-round-10 code still emit them. Filter the
+        // exact 2-line pattern (warning header + savefig source line) so
+        // the user never sees the flood regardless of worker version.
+        text = _stripMatplotlibGlyphWarnings(text);
+        if (!text) return;
         const name = p.name === "stderr" ? "stderr" : "stdout";
         const ci = typeof p.cell_index === "number" ? p.cell_index : 0;
         const cell = this.kernelCells[ci] ?? emptyCell();

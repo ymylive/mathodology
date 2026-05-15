@@ -74,6 +74,56 @@ async function submit(): Promise<void> {
   await store.send(props.runId, text);
 }
 
+// --- example prompts (empty-state chips) ---------------------------------
+// Real natural-language phrases the user can click to seed the input.
+// Mirrors the Claude Code chat pattern: instead of explaining what tools
+// exist, show what asks the agent can fulfil. Each entry has en/zh because
+// the panel is bilingual.
+interface ExamplePrompt {
+  en: string;
+  zh: string;
+}
+const EXAMPLE_PROMPTS: ExamplePrompt[] = [
+  {
+    en: "Tighten the abstract to 180 words and re-emphasize the dual benefit.",
+    zh: "把摘要精简到 180 字以内,并重点突出双重收益。",
+  },
+  {
+    en: "Add a sensitivity analysis paragraph after the model derivation.",
+    zh: "在模型推导后增加一段灵敏度分析。",
+  },
+  {
+    en: "Fix the typo \"lampery\" → \"lamprey\" everywhere.",
+    zh: "把全文中的 \"lampery\" 改为 \"lamprey\"。",
+  },
+  {
+    en: "Bump K_R to 5000 and regenerate the heatmap.",
+    zh: "把 K_R 调到 5000,重新生成热力图。",
+  },
+];
+
+async function pickExample(p: ExamplePrompt): Promise<void> {
+  input.value = i18n.lang === "zh" ? p.zh : p.en;
+  await nextTick();
+  autosize();
+  taRef.value?.focus();
+}
+
+// --- capability hints (above the input) ----------------------------------
+// What the agent can do, in human terms. Hover shows the underlying tool
+// name for power-users who want to know.
+interface Capability {
+  en: string;
+  zh: string;
+  tool: string;
+}
+const CAPABILITIES: Capability[] = [
+  { en: "Edit prose", zh: "改写文字", tool: "surgical_edit / edit_section" },
+  { en: "Tune constants", zh: "调整常量", tool: "edit_constant" },
+  { en: "Redraw figures", zh: "重绘图表", tool: "regenerate_figure" },
+  { en: "Recompile PDF", zh: "重新编译 PDF", tool: "recompile_pdf" },
+];
+
 // --- paper-updated hook ---------------------------------------------------
 // Bumps each time the store finishes a turn that included a successful
 // edit. We forward to the Workbench so it re-fetches paper.md.
@@ -236,11 +286,32 @@ const messages = computed<Message[]>(() => store.messages);
         class="ft-history"
         @scroll="onHistoryScroll"
       >
-        <div v-if="messages.length === 0" class="ft-empty">
-          <T
-            en="Ask the agent to revise a section, tweak a constant, or regenerate a figure. e.g. “Tighten the abstract to 180 words and re-emphasize the dual benefit.”"
-            zh="让智能体修订某一节、微调常量或重绘图表。例如：“将摘要精简到 180 字，并重点突出双重收益。”"
-          />
+        <div v-if="messages.length === 0" class="ft-onboarding">
+          <h3 class="ft-onb-title">
+            <T en="What would you like to change?" zh="想改哪里?" />
+          </h3>
+          <p class="ft-onb-sub">
+            <T
+              en="Describe the change in plain English or Chinese — the agent reads the paper, makes the edit, and recompiles the PDF."
+              zh="用自然语言描述改动 — Agent 会读取论文、执行编辑、重新编译 PDF。"
+            />
+          </p>
+          <div class="ft-examples" role="list">
+            <button
+              v-for="(p, i) in EXAMPLE_PROMPTS"
+              :key="i"
+              type="button"
+              class="ft-example"
+              role="listitem"
+              :aria-label="i18n.t('Use example prompt', '使用示例提示')"
+              @click="pickExample(p)"
+            >
+              <span class="ft-example-arrow" aria-hidden="true">↗</span>
+              <span class="ft-example-text">
+                <T :en="p.en" :zh="p.zh" />
+              </span>
+            </button>
+          </div>
         </div>
 
         <div
@@ -359,17 +430,35 @@ const messages = computed<Message[]>(() => store.messages);
         {{ store.postError }}
       </div>
 
+      <!-- capabilities strip — what the agent can do, plain English -->
+      <div class="ft-caps" v-if="!store.isRunning">
+        <span class="ft-caps-label mono">
+          <T en="Agent can:" zh="Agent 可以:" />
+        </span>
+        <span
+          v-for="c in CAPABILITIES"
+          :key="c.tool"
+          class="ft-cap mono"
+          :title="c.tool"
+        >
+          <T :en="c.en" :zh="c.zh" />
+        </span>
+      </div>
+
       <!-- input bar -->
       <form class="ft-input-bar" @submit.prevent="submit">
         <textarea
           ref="taRef"
           v-model="input"
-          class="ft-input mono"
+          class="ft-input"
           rows="1"
           :placeholder="
             store.isRunning
               ? ''
-              : 'edit_section, edit_constant, regenerate_figure…'
+              : i18n.t(
+                  'Describe a change to the paper — e.g. “Tighten the abstract”',
+                  '描述对论文的改动 — 例如 “精简摘要”',
+                )
           "
           :disabled="store.isRunning"
           @keydown="onKeydown"
@@ -382,6 +471,15 @@ const messages = computed<Message[]>(() => store.messages);
           <T en="Send" zh="发送" /> →
         </button>
       </form>
+
+      <!-- keyboard hint row -->
+      <div class="ft-kbd-hint mono">
+        <kbd>↵</kbd>
+        <T en="to send" zh="发送" />
+        <span class="ft-kbd-sep">·</span>
+        <kbd>⇧↵</kbd>
+        <T en="for newline" zh="换行" />
+      </div>
     </div>
   </section>
 </template>
@@ -429,17 +527,71 @@ const messages = computed<Message[]>(() => store.messages);
   flex-direction: column;
   gap: 12px;
 }
-.ft-empty {
-  color: var(--ink-3);
-  font-size: 13px;
-  line-height: 1.55;
-  padding: 16px 12px;
-  font-family: 'Instrument Serif', serif;
-  font-style: italic;
+/* --- onboarding (empty-state) ----------------------------------------- */
+.ft-onboarding {
+  padding: 18px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-body.zh .ft-empty {
+.ft-onb-title {
+  margin: 0;
+  font-family: 'Instrument Serif', serif;
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-weight: 400;
+}
+body.zh .ft-onb-title {
   font-family: 'Noto Serif SC', serif;
-  font-style: normal;
+}
+.ft-onb-sub {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 56ch;
+}
+.ft-examples {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ft-example {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  border-radius: 2px;
+  color: var(--ink-2);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 80ms ease;
+}
+.ft-example:hover,
+.ft-example:focus-visible {
+  border-color: var(--ink);
+  background: var(--paper-2);
+  outline: none;
+  transform: translateX(2px);
+}
+.ft-example-arrow {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.ft-example:hover .ft-example-arrow {
+  color: var(--hi);
+}
+.ft-example-text {
+  flex: 1 1 auto;
 }
 
 /* --- message rows ------------------------------------------------------ */
@@ -677,20 +829,49 @@ body.zh .ft-empty {
   border-radius: 2px;
 }
 
+/* --- capabilities strip ------------------------------------------------ */
+.ft-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 12px 0 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+}
+.ft-caps-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 2px;
+}
+.ft-cap {
+  padding: 2px 8px;
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  border-radius: 999px;
+  color: var(--ink-2);
+  cursor: help;
+}
+.ft-cap:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
 /* --- input bar -------------------------------------------------------- */
 .ft-input-bar {
-  margin-top: 14px;
+  margin-top: 4px;
   display: flex;
   gap: 10px;
   align-items: flex-end;
 }
 .ft-input {
   flex: 1;
-  min-height: 38px;
+  min-height: 44px;
   max-height: 152px;
-  padding: 8px 12px;
+  padding: 12px 14px;
   font-family: 'Inter', sans-serif;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 22px;
   background: var(--paper);
   color: var(--ink);
@@ -699,8 +880,15 @@ body.zh .ft-empty {
   resize: none;
   overflow-y: auto;
 }
+.ft-input::placeholder {
+  color: var(--ink-4);
+  font-style: italic;
+}
 body.zh .ft-input {
   font-family: 'Inter', system-ui, sans-serif;
+}
+body.zh .ft-input::placeholder {
+  font-style: normal;
 }
 .ft-input:focus {
   outline: none;
@@ -713,7 +901,33 @@ body.zh .ft-input {
 }
 .ft-submit {
   flex: 0 0 auto;
-  padding: 9px 14px;
-  font-size: 11px;
+  padding: 11px 16px;
+  font-size: 11.5px;
+}
+
+/* --- keyboard hint row ------------------------------------------------- */
+.ft-kbd-hint {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--ink-4);
+  letter-spacing: 0.04em;
+}
+.ft-kbd-hint kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 1px 5px;
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  border-bottom-width: 2px;
+  border-radius: 2px;
+  color: var(--ink-2);
+}
+.ft-kbd-sep {
+  opacity: 0.5;
+  margin: 0 2px;
 }
 </style>

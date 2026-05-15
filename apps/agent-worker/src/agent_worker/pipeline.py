@@ -312,8 +312,21 @@ async def _review_and_maybe_revise(
             return current
 
     if _critique_should_fail_run(report):
-        raise AgentError(
-            f"Critic rejected {target_agent} after revision: {report.summary}"
+        # Round-10 QA: a Critic verdict like "mostly appropriate ... but
+        # not ready" used to nuke the whole run (¥4+ wasted). User would
+        # rather see the imperfect artifact than nothing. Emit a loud
+        # warning and proceed — the next stage's prompt picks the reminder
+        # up via `upstream_reminders` so quality concerns still propagate.
+        await critic.emitter.emit(
+            "log",
+            {
+                "level": "warning",
+                "message": (
+                    f"Critic flagged {target_agent} after revision exhausted: "
+                    f"{report.summary[:240]}"
+                ),
+            },
+            agent=target_agent,
         )
 
     # Post-stage hook lifecycle (borrowed from claude-code-sourcemap
@@ -450,7 +463,23 @@ async def _review_and_maybe_rerun_coder(
             return current
 
     if _critique_should_fail_run(report):
-        raise AgentError(f"Critic rejected coder after revision: {report.summary}")
+        # Same relaxation as _review_and_maybe_revise: ship the imperfect
+        # artifact with a loud warning instead of nuking the run. Coder's
+        # "post-revision rejection" is almost always a quality concern, not
+        # a structural failure — the notebook ran, cells executed, figures
+        # were produced. User gets a paper they can fine-tune via the
+        # FinetuneChat panel; a hard failure is harsher than warranted.
+        await critic.emitter.emit(
+            "log",
+            {
+                "level": "warning",
+                "message": (
+                    "Critic flagged coder after revision exhausted: "
+                    f"{report.summary[:240]}"
+                ),
+            },
+            agent="coder",
+        )
 
     # Same post-stage hook lifecycle as _review_and_maybe_revise — surface
     # a `<system_reminder>` for the next stage (writer) when the final

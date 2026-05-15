@@ -959,6 +959,9 @@ def _build_paper_meta(
     }
 
 
+_REF_PREFIX_RE = re.compile(r"^\s*\[(\d+)\]\s*")
+
+
 def _render_paper_markdown(paper: PaperDraft) -> str:
     """Render a PaperDraft to a Markdown document string."""
     parts: list[str] = [f"# {paper.title}", "", "## Abstract", "", paper.abstract]
@@ -966,8 +969,21 @@ def _render_paper_markdown(paper: PaperDraft) -> str:
         parts.extend(["", f"## {section.title}", "", section.body_markdown])
     if paper.references:
         parts.extend(["", "## References", ""])
+        # The Writer naturally emits references with a `[N]` prefix so they
+        # match the inline citations in the body (`...has been studied[1]`).
+        # Using a markdown ordered list here would double-number them as
+        # `1. [1] Arunraj...`. Render each reference on its own line as a
+        # paragraph; markdown then renders them as the bibliography. If the
+        # Writer DIDN'T prefix with `[N]`, fall through to auto-numbering.
+        has_bracket_numbers = all(
+            _REF_PREFIX_RE.match(r) for r in paper.references if r.strip()
+        )
         for i, ref in enumerate(paper.references, start=1):
-            parts.append(f"{i}. {ref}")
+            if has_bracket_numbers:
+                parts.append(ref)
+                parts.append("")
+            else:
+                parts.append(f"{i}. {ref}")
     # Ensure trailing newline for POSIX-friendly files.
     return "\n".join(parts) + "\n"
 

@@ -103,6 +103,7 @@ AgentName = Literal[
     "critic",
     "paper_editor",
     "searcher",
+    "audit",
 ]
 
 EventKind = Literal[

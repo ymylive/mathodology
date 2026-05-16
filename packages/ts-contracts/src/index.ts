@@ -21,6 +21,8 @@ export type AgentName =
   | "writer"
   | "critic"
   | "searcher"
+  | "paper_editor"
+  | "audit"
   | null;
 
 export interface AgentEvent {

@@ -25,8 +25,14 @@ class GatewayClient:
 
     def __init__(self, base_url: str, dev_token: str) -> None:
         self._base = base_url.rstrip("/")
-        # Total timeout 600s for long completions; per-chunk read timeout 30s.
-        timeout = httpx.Timeout(600.0, connect=5.0, read=30.0)
+        # Total timeout 600s for long completions; per-chunk read timeout
+        # 120s — reasoning-effort=high (default project-wide) can keep the
+        # model "thinking" for 30-90s before the first token streams. 30s
+        # was too aggressive and tripped ReadTimeout → AgentError in the
+        # Critic stages during round-10 v7 (¥0.39 wasted to upstream slow
+        # cornna response). 120s gives enough headroom for thinking budget
+        # while still catching genuinely-dead connections.
+        timeout = httpx.Timeout(600.0, connect=5.0, read=120.0)
         self._client = httpx.AsyncClient(timeout=timeout)
         self._headers = {"Authorization": f"Bearer {dev_token}"}
 

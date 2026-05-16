@@ -286,22 +286,21 @@ async def _run_audit_and_maybe_revise(
     fake_critique = CritiqueReport(
         target_agent="writer",
         target_schema="PaperDraft",
-        scores={"audit": 0.0},
         passed=False,
-        has_blocking_findings=True,
-        major_findings=[
+        score=0.0,
+        summary=audit_hint,
+        findings=[
             CritiqueFinding(
-                dimension="audit",
-                severity="major",
-                description=f.message,
-                fix_hint=f.fix_hint,
+                severity="blocking",
+                area="audit",
+                message=f.message,
+                evidence=f"audit/{f.code}: see paper.md and run dir",
+                required_change=f.fix_hint,
             )
             for f in writer_blocking
         ],
-        minor_findings=[],
-        summary=audit_hint,
-        checklist_pass_rate=0.0,
-        recommended_action="revise",
+        required_changes=[f.fix_hint for f in writer_blocking],
+        budget_exhausted=False,
     )
 
     await cancel.check_or_raise()

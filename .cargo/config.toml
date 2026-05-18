@@ -1,0 +1,42 @@
+# Workspace-local cargo config. Tuned for incremental dev builds on macOS
+# arm64 and Linux. Not committed to .dockerignore (Docker builds copy this
+# in so the in-container cargo respects the same profile knobs).
+
+[build]
+# Leave 3 cores free on a 15-core machine to keep the editor/LLM responsive.
+# Lower this to 8 if you see other tools starved (rust-analyzer doubles up).
+jobs = 12
+# Don't force incremental at [build] scope — it would silently enable
+# incremental on release builds too (which inflates target/ to many GB without
+# meaningfully helping). Per-profile defaults already do the right thing:
+# dev = incremental on, release = off.
+
+# macOS arm64: default `cc`-driven linker on CLT 1266.x IS Apple's "ld-prime"
+# (the modern ld shipped with Xcode 15+ / CLT 15+). It is ~2-3x faster than
+# the classic ld64 for our crate count and is what `rustc` reaches for by
+# default — no override needed.
+#
+# Fallback to `lld` (LLVM) if you ever lose ld-prime (e.g. CI on older
+# images, or a bad CLT pin). Install once: `brew install llvm`, then
+# uncomment the block below. lld is feature-complete on macOS now and
+# slightly faster on huge link units.
+#
+# [target.aarch64-apple-darwin]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"]
+
+# Linux: prefer mold if present. Harmless if not installed — cargo just falls
+# through to the default linker. To install: `apt-get install mold` or
+# `cargo install mold-linker`.
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+# [target.aarch64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# Optional: enable `sccache` as a rustc wrapper to share compilation across
+# branches and `cargo clean` runs. Install once: `cargo install sccache` or
+# `brew install sccache`. Then uncomment.
+# [build]
+# rustc-wrapper = "sccache"

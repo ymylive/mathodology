@@ -71,8 +71,16 @@ jobs:
         working-directory: crates/gateway
         run: sqlx migrate run
 
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      # Prime target/ with a single `cargo test --no-run` so the dep build
+      # graph (incl. test-cfg) lands in cache exactly once. clippy below uses
+      # `--no-deps` so it ignores dependency lints (we don't gate on those
+      # anyway) and just re-lints the gateway crate against the same rmeta
+      # the test step will reuse. Net effect: ~2-4 min off cold CI runs.
+      - name: cargo test --no-run (prime cache)
+        run: cargo test --workspace --all-targets --no-run
+
+      - name: cargo clippy (workspace only)
+        run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
 
       - name: cargo test
         run: cargo test --workspace

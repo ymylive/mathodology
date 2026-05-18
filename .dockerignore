@@ -6,6 +6,11 @@ target/
 **/__pycache__/
 **/*.pyc
 
+# Host-only cargo config (linker tweaks, jobs count). Inside the build
+# container we want the defaults — fewer surprises, smaller invalidation
+# surface for the cargo-chef recipe.
+.cargo/
+
 # Local data
 runs/
 docker-data/

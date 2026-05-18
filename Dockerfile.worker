@@ -45,24 +45,50 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 RUN npm install -g open-websearch
 
 RUN useradd --system --uid 1000 --create-home --home-dir /app --shell /bin/bash app \
- && mkdir -p /app /data/runs \
+ && mkdir -p /app /data/runs /app/.cache/uv \
  && chown -R app:app /app /data
 
 WORKDIR /app
-# Copy workspace manifests + lock first for layer cache.
+
+# ---- dependency layer (cache-friendly) -------------------------------------
+# Copy ONLY the workspace + member manifests + READMEs first. uv reads these
+# to lock down the dependency graph; the actual src trees don't matter for
+# the resolver. Touching application code therefore no longer invalidates
+# the heavy pip/wheel download layer.
 COPY --chown=app:app pyproject.toml uv.lock ./
-COPY --chown=app:app apps/agent-worker /app/apps/agent-worker
-COPY --chown=app:app packages/py-contracts /app/packages/py-contracts
+COPY --chown=app:app apps/agent-worker/pyproject.toml /app/apps/agent-worker/
+COPY --chown=app:app apps/agent-worker/README.md      /app/apps/agent-worker/
+COPY --chown=app:app packages/py-contracts/pyproject.toml /app/packages/py-contracts/
+COPY --chown=app:app packages/py-contracts/README.md     /app/packages/py-contracts/
+
+# Stub source trees so hatchling's wheel-build step has something to package.
+# These are overwritten by the real COPY below; uv sync's editable install
+# means they don't need a re-sync.
+RUN mkdir -p apps/agent-worker/src/agent_worker packages/py-contracts/src/mm_contracts && \
+    touch  apps/agent-worker/src/agent_worker/__init__.py \
+           packages/py-contracts/src/mm_contracts/__init__.py && \
+    chown -R app:app apps packages
 
 USER app
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_CACHE_DIR=/app/.cache/uv \
     PATH=/app/.venv/bin:$PATH \
     RUNS_DIR=/data/runs \
     PYTHONUNBUFFERED=1 \
     OPEN_WEBSEARCH_CMD=open-websearch
 
-# Resolve from the workspace root so mm-contracts (workspace dep) is found.
-RUN uv sync --frozen --package agent-worker
+# Wheel cache mount survives across builds, so re-resolves don't re-download
+# numpy/scipy/pandas/matplotlib/scikit-learn (~150MB combined). Anonymous-id
+# cache mounts work even when the lock changes — uv just reuses the wheels
+# it already has.
+RUN --mount=type=cache,target=/app/.cache/uv,uid=1000,gid=1000 \
+    uv sync --frozen --package agent-worker
+
+# ---- application layer ----
+# Now bring in the real source. uv installs workspace members as editable
+# by default, so overwriting the stubs is enough — no second `uv sync` needed.
+COPY --chown=app:app apps/agent-worker      /app/apps/agent-worker
+COPY --chown=app:app packages/py-contracts  /app/packages/py-contracts
 
 WORKDIR /app/apps/agent-worker
 # Exec via the synced venv directly — avoids uv re-resolving on every start.

@@ -37,6 +37,7 @@ const AGENTS: { agent: Exclude<AgentName, null>; num: string; en: string; zh: st
   { agent: "coder",    num: "D · 04", en: "Coder",    zh: "编程员" },
   { agent: "writer",   num: "E · 05", en: "Writer",   zh: "撰写员" },
   { agent: "critic",   num: "Q · 06", en: "Critic",   zh: "审查员" },
+  { agent: "audit",    num: "G · 07", en: "Audit",    zh: "审核门" },
 ];
 
 function firstStartFor(agent: AgentName, events: AgentEvent[]): AgentEvent | null {

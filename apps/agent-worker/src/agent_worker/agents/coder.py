@@ -15,7 +15,6 @@ import json
 import time
 from typing import Any, Literal
 
-import orjson
 from mm_contracts import (
     AnalyzerOutput,
     CellExecution,
@@ -28,7 +27,7 @@ from mm_contracts import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from agent_worker.agents.base import AgentError, AgentParseError
+from agent_worker.agents.base import AgentError, AgentParseError, _parse_json_lenient
 from agent_worker.chart_catalog import render_index_markdown
 from agent_worker.events import EventEmitter
 from agent_worker.gateway_client import GatewayClient
@@ -346,6 +345,48 @@ class CoderAgent:
                 final_summary = "Reached iteration limit without explicit done."
 
             notebook_path = await self.kernel.write_notebook(cells)
+
+            # Auto-recover figures the LLM saved to disk but forgot to declare.
+            # Round-10 QA run produced 8 PNGs on disk but the LLM only listed
+            # 2 in figures_saved across turns. Each unregistered PNG becomes
+            # an orphan: the Writer never sees it, the paper omits it, and
+            # the Coder's work is wasted. Scan figures/ here and register any
+            # PNG whose id (stem) isn't already known. The auto-caption is
+            # generic but better than dropping the figure entirely; the
+            # Writer can still embed it via [[FIG:<id>]] and add prose.
+            figures_dir = self.kernel.run_dir / "figures"
+            if figures_dir.is_dir():
+                for png in sorted(figures_dir.glob("*.png")):
+                    fig_id = png.stem
+                    if fig_id in seen_ids:
+                        continue
+                    rel_png = f"figures/{png.name}"
+                    svg = png.with_suffix(".svg")
+                    figures.append(
+                        Figure(
+                            id=fig_id,
+                            caption=(
+                                f"Auto-discovered figure: {fig_id.replace('_', ' ')}."
+                            ),
+                            path_png=rel_png,
+                            path_svg=(
+                                f"figures/{svg.name}" if svg.is_file() else None
+                            ),
+                            width=0.8,
+                        )
+                    )
+                    seen_ids.add(fig_id)
+                    await self.emitter.emit(
+                        "log",
+                        {
+                            "level": "info",
+                            "message": (
+                                f"auto-recovered undeclared figure {fig_id!r}"
+                            ),
+                        },
+                        agent=self.AGENT_NAME,
+                    )
+
             # Back-compat: `figure_paths` is the union of inline-display paths
             # captured by the kernel AND the explicit PNG paths the LLM
             # registered. Older consumers that only read `figure_paths` still
@@ -481,9 +522,16 @@ class CoderAgent:
             if cleaned.endswith("```"):
                 cleaned = cleaned.rsplit("```", 1)[0]
             cleaned = cleaned.strip()
+        # Use the same lenient parse BaseAgent does (round 7): strict first,
+        # then `json.JSONDecoder.raw_decode` to recover when gpt-5.5 emits a
+        # valid JSON object followed by extra prose / a second back-to-back
+        # object. Without this the Coder fatally fails on a model output
+        # mode that's well within the lenient parser's recovery envelope.
         try:
-            obj = orjson.loads(cleaned)
-        except Exception as e:
+            obj = _parse_json_lenient(cleaned)
+        except AgentParseError:
+            raise
+        except Exception as e:  # noqa: BLE001 — match BaseAgent's contract
             raise AgentParseError(f"not valid JSON: {e}") from e
         try:
             return CoderDirective.model_validate(obj)

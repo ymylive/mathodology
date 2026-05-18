@@ -40,6 +40,26 @@ tempfile = "=3.14"
 [profile.dev]
 opt-level = 0
 debug = 1
+# macOS: write debug info to separate .dSYM-style files instead of embedding
+# into the final binary. Cuts link time ~30-50% on incremental rebuilds.
+# Harmless on Linux (default behaviour is similar).
+split-debuginfo = "unpacked"
+
+# Compile *dependencies* with light optimization (O1) but keep our own code at
+# O0. This pays a one-time penalty on a clean build, then every incremental
+# rebuild is faster (smaller debug info to relink, deps stay cached) and the
+# resulting binaries run noticeably quicker for end-to-end tests / smoke runs.
+# Workspace gateway code is still rebuilt at O0 + incremental — instant.
+[profile.dev.package."*"]
+opt-level = 1
+debug = false
+
+# Some tests/benches that hit serde / regex / sha2 / sqlx_macros benefit from
+# even more aggressive optimization. These are compiled once and cached.
+[profile.dev.package.sqlx-macros]
+opt-level = 3
+[profile.dev.package.serde_derive]
+opt-level = 3
 
 [profile.release]
 opt-level = 3

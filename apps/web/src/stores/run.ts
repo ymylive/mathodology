@@ -103,9 +103,55 @@ function emptyCell(): KernelCellState {
   return { stdout: "", stderr: "", figures: [] };
 }
 
+// Workers running matplotlib without an installed CJK font + missing the
+// round-10 warnings filter emit a 2-line block per missing glyph per
+// savefig call: a UserWarning header and the offending source line. A
+// single Coder turn can generate hundreds of these and they crowd out
+// real diagnostics. Drop them client-side so the cell-stderr panel
+// stays useful regardless of which worker version ran the cell.
+//
+// Patterns we match (each is one source line; the source-line variant of
+// "  plt.savefig(..." follows the warning header):
+//   `/path/to/ipykernel.../*.py:NNN: UserWarning: Glyph N (\N{...}) missing from font(s) ...`
+//   `  plt.savefig('figures/foo.png', dpi=...)`
+//
+// The savefig line is the warning's "source pointer" the Python warnings
+// machinery prints after the message — useless without the message, so
+// we drop both. We also drop standalone `Glyph N ... missing from font`
+// lines for the rare proxy that prints only the message.
+const _GLYPH_WARN_RE =
+  /^.*UserWarning: Glyph \d+.*missing from font\(s\).*\n(?:\s+plt\.savefig\([^)]*\)\s*\n)?/gm;
+const _GLYPH_BARE_RE =
+  /^Glyph \d+ \(\\N\{[^}]+\}\) missing from font\(s\)[^\n]*\n?/gm;
+const _SAVEFIG_BARE_RE =
+  /^\s+plt\.savefig\(['"]figures\/[^)]+\)\s*\n?/gm;
+
+function _stripMatplotlibGlyphWarnings(text: string): string {
+  if (!text) return text;
+  if (!text.includes("missing from font")) return text;
+  return text
+    .replace(_GLYPH_WARN_RE, "")
+    .replace(_GLYPH_BARE_RE, "")
+    .replace(_SAVEFIG_BARE_RE, "");
+}
+
 // The WebSocket client is kept outside reactive state so Vue doesn't try to
 // proxy its internals (and so we don't log the whole socket into devtools).
 let ws: RunWsClient | null = null;
+
+// Token-batching buffer.
+//
+// Vue/Pinia re-renders on every reactive write. Writing each token directly
+// to `this.tokens[agentKey].text` means ~5000 full re-renders per Coder
+// stage, which silently jams the render queue — the UI freezes mid-stage
+// even though the WS is still receiving tokens (a hard refresh "fixes"
+// it because it resets reactivity from the latest snapshot).
+//
+// Instead: queue deltas into this plain Map keyed by agent. A single rAF
+// loop drains the queue into reactive state once per animation frame, so
+// the render rate is capped at ~60fps regardless of token rate.
+const _pendingTokenDeltas: Map<string, { delta: string; model: string | null; ts: string }> = new Map();
+let _flushScheduled = false;
 
 export const useRunStore = defineStore("run", {
   state: (): State => ({
@@ -145,6 +191,9 @@ export const useRunStore = defineStore("run", {
     reset() {
       ws?.close();
       ws = null;
+      // Drop any pending token deltas from the prior run so they don't
+      // leak into the fresh `tokens` state on the next rAF flush.
+      _pendingTokenDeltas.clear();
       this.runId = null;
       this.status = "idle";
       this.events = [];
@@ -256,32 +305,91 @@ export const useRunStore = defineStore("run", {
       if (ev.kind === "token") {
         const payload = ev.payload as { text?: unknown; model?: unknown };
         const delta = typeof payload.text === "string" ? payload.text : "";
-        const existing = this.tokens[agentKey] ?? emptyStream();
-        this.tokens[agentKey] = {
-          text: existing.text + delta,
-          model:
-            typeof payload.model === "string" ? payload.model : existing.model,
-          updatedAt: ev.ts,
-        };
+        if (!delta) return;
+        const model =
+          typeof payload.model === "string" ? payload.model : null;
+        // Accumulate into the non-reactive buffer. The pending entry holds
+        // the CONCATENATED delta since the last flush, the latest model
+        // value, and the newest event ts.
+        const pending = _pendingTokenDeltas.get(agentKey);
+        if (pending) {
+          pending.delta += delta;
+          if (model) pending.model = model;
+          pending.ts = ev.ts;
+        } else {
+          _pendingTokenDeltas.set(agentKey, {
+            delta,
+            model,
+            ts: ev.ts,
+          });
+        }
+        // Schedule one rAF flush per frame. The flush mutates reactive
+        // state, so Vue re-renders at most ~60 Hz instead of per-token.
+        if (!_flushScheduled) {
+          _flushScheduled = true;
+          const flush = (): void => {
+            _flushScheduled = false;
+            if (_pendingTokenDeltas.size === 0) return;
+            for (const [k, p] of _pendingTokenDeltas) {
+              const existing = this.tokens[k] ?? emptyStream();
+              this.tokens[k] = {
+                text: existing.text + p.delta,
+                model: p.model ?? existing.model,
+                updatedAt: p.ts,
+              };
+            }
+            _pendingTokenDeltas.clear();
+          };
+          if (typeof requestAnimationFrame !== "undefined") {
+            requestAnimationFrame(flush);
+          } else {
+            // Headless fallback (tests / SSR).
+            setTimeout(flush, 16);
+          }
+        }
         return;
       }
 
       // Kernel stdout/stderr: incremental text per cell. Folded into
       // kernelCells; kept out of the ordered feed (too chatty for the feed).
+      // Hard cap per-stream length so a runaway warning flood (e.g. the
+      // matplotlib glyph-missing warnings before round-10 kernel bootstrap
+      // fix) can't blow up DOM size or freeze the render with a 5MB string.
       if (ev.kind === "kernel.stdout") {
         const p = ev.payload as {
           text?: unknown;
           name?: unknown;
           cell_index?: unknown;
         };
-        const text = typeof p.text === "string" ? p.text : "";
+        let text = typeof p.text === "string" ? p.text : "";
+        // Belt-and-braces drop of the matplotlib CJK-glyph warnings. The
+        // kernel bootstrap silences them via warnings.filterwarnings, but
+        // workers running pre-round-10 code still emit them. Filter the
+        // exact 2-line pattern (warning header + savefig source line) so
+        // the user never sees the flood regardless of worker version.
+        text = _stripMatplotlibGlyphWarnings(text);
+        if (!text) return;
         const name = p.name === "stderr" ? "stderr" : "stdout";
         const ci = typeof p.cell_index === "number" ? p.cell_index : 0;
         const cell = this.kernelCells[ci] ?? emptyCell();
+        const MAX_STREAM_CHARS = 32_000;
+        const truncate = (existing: string, delta: string): string => {
+          const combined = existing + delta;
+          if (combined.length <= MAX_STREAM_CHARS) return combined;
+          // Keep the tail (most recent output is most relevant when
+          // debugging); prepend a one-line note so the truncation is visible.
+          const tail = combined.slice(-MAX_STREAM_CHARS);
+          return (
+            "[…truncated to last " +
+            MAX_STREAM_CHARS.toString() +
+            " chars…]\n" +
+            tail
+          );
+        };
         if (name === "stderr") {
-          cell.stderr = cell.stderr + text;
+          cell.stderr = truncate(cell.stderr, text);
         } else {
-          cell.stdout = cell.stdout + text;
+          cell.stdout = truncate(cell.stdout, text);
         }
         this.kernelCells[ci] = cell;
         return;
@@ -372,6 +480,9 @@ export const useRunStore = defineStore("run", {
       if (ev.kind === "stage.start") {
         // New stage for this agent: clear the streaming buffer so the UI
         // shows fresh text rather than concatenating across stages.
+        // Also drop any pending deltas for this agent so a late rAF flush
+        // doesn't re-pollute the freshly-cleared buffer.
+        _pendingTokenDeltas.delete(agentKey);
         this.tokens[agentKey] = {
           text: "",
           model: this.tokens[agentKey]?.model ?? null,

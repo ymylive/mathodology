@@ -143,13 +143,35 @@ async def test_search_crossref_swallows_owned_client_errors(httpx_mock) -> None:
 
 
 async def test_batch_search_crossref_skips_failed_queries(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    httpx_mock.add_response(json=_SAMPLE_RESPONSE)
-    httpx_mock.add_response(status_code=429)
-    httpx_mock.add_response(json={"message": {"items": []}})
+    # Round-10: crossref now retries 429 with backoff (_MAX_RETRIES=3,
+    # mirroring arxiv.py). Match by query so each q's full retry sequence
+    # is served by the right mock without depending on registration order.
+    import re
 
-    results = await batch_search_crossref(["q1", "q2", "q3"], max_per_query=5)
+    httpx_mock.add_response(
+        url=re.compile(r".*query=q1.*"),
+        json=_SAMPLE_RESPONSE,
+    )
+    httpx_mock.add_response(
+        url=re.compile(r".*query=q2.*"),
+        status_code=429,
+        is_reusable=True,
+    )
+    httpx_mock.add_response(
+        url=re.compile(r".*query=q3.*"),
+        json={"message": {"items": []}},
+    )
+
+    # Speed up the retries so the test stays fast.
+    import agent_worker.tools.crossref as cr
+    orig_delay = cr._BASE_DELAY
+    cr._BASE_DELAY = 0.0
+    try:
+        results = await batch_search_crossref(["q1", "q2", "q3"], max_per_query=5)
+    finally:
+        cr._BASE_DELAY = orig_delay
     assert set(results.keys()) == {"q1", "q2", "q3"}
-    # q1 returns 3, q2 429s → 0, q3 empty → 0.
+    # q1 returns 3, q2 exhausts retries → 0, q3 empty → 0.
     total = sum(len(v) for v in results.values())
     assert total == 3
 

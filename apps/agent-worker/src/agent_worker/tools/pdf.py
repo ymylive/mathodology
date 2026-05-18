@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +29,16 @@ _log = logging.getLogger(__name__)
 
 ARXIV_PDF_TEMPLATE = "https://arxiv.org/pdf/{arxiv_id}.pdf"
 UNPAYWALL_API_URL = "https://api.unpaywall.org/v2/{doi}"
+
+# pdfplumber leaks `(cid:NNN)` tokens when a PDF uses font subsets whose
+# character maps aren't recoverable. Downstream stages (Modeler/Writer)
+# get noisier prompts and the saved papers/NN.md is hard to read. Strip
+# them — they carry no information once decoding has failed.
+_CID_ARTIFACT_RE = re.compile(r"\(cid:\d+\)")
+
+
+def _strip_cid_artifacts(text: str) -> str:
+    return _CID_ARTIFACT_RE.sub("", text)
 
 
 async def find_pdf_url(
@@ -74,7 +85,12 @@ async def find_pdf_url(
             r.raise_for_status()
             data = r.json()
     except Exception as e:  # noqa: BLE001 — best-effort
-        _log.warning("Unpaywall lookup failed for %s: %s", paper.doi, e)
+        # Use the resolved `doi` (which may come from paper.url when
+        # paper.doi is None) instead of paper.doi so the log is actually
+        # useful for debugging. 422 from Unpaywall typically means "DOI
+        # not in our OA index" — that's expected for IEEE proceedings
+        # etc., not a bug.
+        _log.info("Unpaywall lookup failed for %s: %s", doi, e)
         return None
 
     if not isinstance(data, dict):
@@ -121,6 +137,7 @@ async def fetch_and_extract(
             with pdfplumber.open(io.BytesIO(content)) as pdf:
                 pages_text = [p.extract_text() or "" for p in pdf.pages]
             text = "\n\n".join(t for t in pages_text if t.strip())
+            text = _strip_cid_artifacts(text)
         except Exception as e:  # noqa: BLE001
             _log.warning("fetch_and_extract: pdfplumber failed for %s: %s", url, e)
             return None, "none"

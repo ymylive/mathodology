@@ -1,6 +1,6 @@
 version = "1.0.0"
 agent = "writer"
-model_preference = ["deepseek-chat", "moonshot-v1-32k"]
+model_preference = ["gpt-5.5", "gpt-5.4"]
 token_budget_in = 24000
 token_budget_out = 8000
 temperature = 0.2
@@ -38,6 +38,7 @@ title + abstract + sections: Introduction → Problem Analysis → Assumptions &
 
 ## Figures (mandatory discipline)
 - Coder provides `coder_figures` (id, caption, path_png, path_svg, width). Embed with `[[FIG:<id>]]` on its own line. The pipeline substitutes the real image.
+- **EVERY figure in `coder_figures` MUST be embedded somewhere in the paper** — orphan figures are wasted Coder work and a scoring deduction. Iterate through the list and place each `[[FIG:<id>]]` in the section where it best supports the prose. Recount your placeholders before emitting: count(coder_figures) MUST equal count([[FIG:...]]) in your sections.
 - NEVER write `![](path)` or invent figure ids — unknown ids are silently dropped.
 - Every embedded figure must be discussed in the surrounding text with at least one sentence referencing a number from the figure. Placing a figure without discussion is a scoring deduction.
 - Figure captions (already set by Coder) are independently readable — do not duplicate long captions in the body.

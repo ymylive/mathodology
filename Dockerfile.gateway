@@ -1,5 +1,32 @@
 # syntax=docker/dockerfile:1.7
 
+# ---- chef (shared base) ----
+# cargo-chef separates *dependency* compilation from *application* compilation:
+# the recipe.json fingerprint only changes when Cargo.toml / Cargo.lock /
+# rust-toolchain.toml change, so the heavy `cook` layer hits the buildx cache
+# every time only the source files in crates/ change. Before: a one-line code
+# edit invalidated the entire target/ cache mount and rebuilt all 346 deps
+# (~3-5 min). After: the cooked deps are reused; only gateway itself rebuilds
+# (~20-40s).
+FROM rust:1.83-slim-bookworm AS chef
+ENV CARGO_TERM_COLOR=always DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+# cargo-chef is small (~5 MB binary). Pin a minor version so a future
+# breaking change doesn't surprise us on a clean cache.
+RUN cargo install cargo-chef --locked --version '^0.1.68'
+WORKDIR /src
+
+# ---- planner ----
+# Produces recipe.json — a deterministic summary of every dep + version. The
+# source files get copied here too because chef walks them for path deps, but
+# the recipe ignores their content (only Cargo.toml / Cargo.lock matter).
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+RUN cargo chef prepare --recipe-path recipe.json
+
 # ---- builder ----
 # NB: do NOT pin to --platform=$BUILDPLATFORM here. We want the builder to
 # match the buildx target so cargo emits a binary the runtime image can
@@ -7,20 +34,19 @@
 # arm64 images (qemu-x86_64 launch failures on Apple Silicon / Graviton),
 # fixed in v0.5.1. Trade-off: arm64 builds run cargo under qemu, ~3x
 # slower, but correctness wins.
-FROM rust:1.83-slim-bookworm AS builder
-ENV CARGO_TERM_COLOR=always DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      pkg-config libssl-dev ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM chef AS builder
+# Cook only the recipe — this is the expensive step we want to keep in cache
+# across application source changes.
+COPY --from=planner /src/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    cargo chef cook --release --recipe-path recipe.json --bin gateway
 
-WORKDIR /src
-# Copy the full workspace; Cargo needs every member's manifest to resolve.
+# Now bring in real source and do the final, cheap, incremental build.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
-
-# Release build of just the gateway binary.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
     cargo build --release --bin gateway \
  && cp /src/target/release/gateway /usr/local/bin/gateway
 

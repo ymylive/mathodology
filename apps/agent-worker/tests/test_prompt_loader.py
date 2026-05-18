@@ -11,7 +11,7 @@ def test_load_analyzer_v1_fields() -> None:
     assert isinstance(spec, PromptSpec)
     assert spec.version == "1.0.0"
     assert spec.agent == "analyzer"
-    assert spec.model_preference[0] == "deepseek-chat"
+    assert spec.model_preference[0] == "gpt-5.5"
     assert spec.token_budget_in == 8000
     assert spec.token_budget_out == 4000
     assert spec.temperature == pytest.approx(0.2)

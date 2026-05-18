@@ -50,18 +50,56 @@ KERNEL_READY_TIMEOUT_S = 30
 _MPL_BOOTSTRAP_SRC = (
     """
 import logging
-# The CJK font fallback chain below lists 4 candidates. On any single host
+import warnings
+# The CJK font fallback chain below lists candidates. On any single host
 # only one will exist, and matplotlib logs "Font family 'X' not found" at
 # INFO level for every miss, every figure — 3 spammy lines per plot. The
 # render is still correct (it uses the first found family) so we silence the
 # font_manager logger up to ERROR.
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+
+# Suppress the matplotlib "Glyph N missing from font(s) DejaVu …" UserWarning
+# spam (~one per CJK char per savefig — hundreds of lines per stage in
+# Coder's stderr stream). The render is still readable on systems that DO
+# have a CJK font installed; on systems that don't, the warning told us
+# nothing actionable. Filter targets matplotlib's `_get_layout` warning
+# specifically, so unrelated UserWarnings still surface.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Glyph .* missing from font\\(s\\).*",
+    category=UserWarning,
+    module=r"matplotlib(\\..*)?",
+)
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-plt.rcParams["font.family"] = [
-    "Songti SC", "PingFang SC", "Microsoft YaHei", "SimSun", "DejaVu Sans",
+
+# Detect installed CJK fonts up front so every family slot ends with the
+# one that actually exists, not just a hopeful list. Order: Mac → Windows →
+# common Linux installs. matplotlib's font_manager builds its cache at
+# import time, so this lookup is cheap (in-memory).
+try:
+    from matplotlib import font_manager as _fm
+    _installed = {f.name for f in _fm.fontManager.ttflist}
+except Exception:
+    _installed = set()
+_cjk_candidates = [
+    "Songti SC", "PingFang SC", "Heiti SC", "STHeiti",
+    "Microsoft YaHei", "SimHei", "SimSun",
+    "Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Serif CJK SC",
+    "WenQuanYi Zen Hei", "WenQuanYi Micro Hei",
 ]
+_present_cjk = [c for c in _cjk_candidates if c in _installed]
+
+# Build family lists for sans / serif / default. Prepend any installed CJK
+# font so glyphs render correctly even when user code switches to serif
+# (which is where the "DejaVu Serif missing glyph" warnings came from).
+_base_sans = _present_cjk + ["DejaVu Sans", "Arial", "Helvetica"]
+_base_serif = _present_cjk + ["DejaVu Serif", "Times New Roman", "serif"]
+plt.rcParams["font.family"] = _base_sans
+plt.rcParams["font.sans-serif"] = _base_sans
+plt.rcParams["font.serif"] = _base_serif
 plt.rcParams["axes.unicode_minus"] = False
 plt.rcParams["figure.figsize"] = (6.4, 4.0)
 plt.rcParams["figure.dpi"] = 120
@@ -71,6 +109,28 @@ plt.rcParams["axes.grid"] = True
 plt.rcParams["grid.alpha"] = 0.25
 plt.rcParams["axes.spines.top"] = False
 plt.rcParams["axes.spines.right"] = False
+
+# CJK self-test: ask font_manager which font would be selected for
+# rendering the active family, then check whether it actually has a
+# common Chinese codepoint mapped. The audit gate (audit.py) reads
+# the sentinel file written here to decide whether to bounce the run
+# back to Coder for English-label figures.
+import os as _os
+try:
+    from matplotlib import font_manager as _fm
+    _resolved = _fm.findfont(plt.rcParams["font.sans-serif"][0])
+    _font = _fm.get_font(_resolved)
+    # 0x6D4B = '测' — a non-trivial CJK ideograph. get_char_index returns
+    # 0 when the glyph is missing.
+    _cjk_ok = bool(_font.get_char_index(0x6D4B))
+except Exception:
+    _cjk_ok = False
+# Kernel cwd is run_dir; the audit reads `.cjk_font_ok` from there.
+try:
+    with open(_os.path.join(_os.getcwd(), ".cjk_font_ok"), "w") as _f:
+        _f.write("true" if _cjk_ok else "false")
+except Exception:
+    pass
 """
     # Helpers (`styled_figure`, `save_figure`, `annotate_peak`) are defined
     # in `agent_worker._chart_helpers` and inlined here so the kernel — which

@@ -126,6 +126,15 @@ impl ProviderAdapter for OpenAICompatAdapter {
         self.models.iter().any(|m| m == model)
     }
 
+    fn has_credentials(&self) -> bool {
+        // Empty string = no auth available (the constructor preserves the
+        // empty-string convention used by the Ollama-local case AND by
+        // dead-key providers loaded from a missing env var). The Ollama
+        // base URL exception keeps it functional offline.
+        !self.api_key.is_empty() || self.base_url.contains("127.0.0.1")
+            || self.base_url.contains("localhost")
+    }
+
     async fn complete(&self, req: CanonicalRequest) -> Result<CanonicalResponse, ProviderError> {
         let body = self.build_body(&req, false);
         let resp = self.build_request(body).send().await?;

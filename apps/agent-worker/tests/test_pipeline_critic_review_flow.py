@@ -3,8 +3,6 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Any
 
-import pytest
-from agent_worker.agents import AgentError
 from agent_worker.pipeline import (
     CriticPolicy,
     _review_and_maybe_revise,
@@ -44,10 +42,27 @@ class _SequenceProducer(_FakeProducer):
         self.revisions = revisions
 
 
+class _FakeEmitter:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any], str | None]] = []
+
+    async def emit(
+        self,
+        kind: str,
+        payload: dict[str, Any] | None = None,
+        agent: str | None = None,
+    ) -> None:
+        self.events.append((kind, payload or {}, agent))
+
+
 class _FakeCritic:
     def __init__(self, reports: list[CritiqueReport]) -> None:
         self.reports = reports
         self.calls = 0
+        # Round-10: pipeline.py now emits a `log` warning on the critic's
+        # emitter when revisions exhaust on a blocking-but-not-structural
+        # verdict. Tests need a real-ish emitter that records the call.
+        self.emitter = _FakeEmitter()
 
     async def review(self, **_: Any) -> CritiqueReport:
         self.calls += 1
@@ -212,14 +227,18 @@ async def test_review_and_maybe_revise_stops_when_cost_budget_is_exhausted() -> 
     assert critic.calls == 2
 
 
-async def test_review_and_maybe_revise_fails_after_budget_with_blocking() -> None:
+async def test_review_and_maybe_revise_warns_but_does_not_fail_after_revisions() -> None:
+    """Round-10 QA: when Critic exhausts revisions on a blocking-but-not-
+    structural verdict, the pipeline used to raise AgentError and waste
+    the entire run (¥4+). Now it emits a `log` warning and returns the
+    last artifact, so downstream stages still run and the user sees a
+    paper they can fine-tune."""
     original = _analysis(["Estimate demand"])
-    producer = _SequenceProducer(
-        [
-            _analysis(["Estimate demand", "Optimize allocation"]),
-            _analysis(["Estimate demand", "Optimize allocation", "Validate robustness"]),
-        ]
-    )
+    revisions = [
+        _analysis(["Estimate demand", "Optimize allocation"]),
+        _analysis(["Estimate demand", "Optimize allocation", "Validate robustness"]),
+    ]
+    producer = _SequenceProducer(revisions)
     critic = _FakeCritic(
         [
             _report(False, blocking=True),
@@ -228,20 +247,28 @@ async def test_review_and_maybe_revise_fails_after_budget_with_blocking() -> Non
         ]
     )
 
-    with pytest.raises(AgentError):
-        await _review_and_maybe_revise(
-            critic=critic,  # type: ignore[arg-type]
-            producer=producer,  # type: ignore[arg-type]
-            target_agent="analyzer",
-            output=original,
-            context={"problem_text": "Estimate demand and optimize allocation."},
-            criteria=["covers all sub-questions"],
-            policy=CriticPolicy(
-                max_revision_rounds=2,
-                max_revision_rounds_overrides=_NO_OVERRIDES,
-                max_revision_cost_rmb=10.0,
-            ),
-        )
+    result = await _review_and_maybe_revise(
+        critic=critic,  # type: ignore[arg-type]
+        producer=producer,  # type: ignore[arg-type]
+        target_agent="analyzer",
+        output=original,
+        context={"problem_text": "Estimate demand and optimize allocation."},
+        criteria=["covers all sub-questions"],
+        policy=CriticPolicy(
+            max_revision_rounds=2,
+            max_revision_rounds_overrides=_NO_OVERRIDES,
+            max_revision_cost_rmb=10.0,
+        ),
+    )
 
+    # Last revision wins — pipeline ships the best-effort artifact.
+    assert result is revisions[-1]
     assert producer.revision_calls == 2
     assert critic.calls == 3
+    # And we emitted a loud warning so the UI / logs surface the concern.
+    warnings = [
+        e for e in critic.emitter.events
+        if e[0] == "log" and e[1].get("level") == "warning"
+    ]
+    assert len(warnings) == 1
+    assert "analyzer" in warnings[0][1]["message"]
